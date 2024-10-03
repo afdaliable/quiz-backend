@@ -3,6 +3,7 @@ use super::KategoriSoal;
 use super::PaketSoal;
 use super::PaketSoalItem;
 use crate::model::PaketSoalResponse;
+use crate::model::ListPaketSoal;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -98,6 +99,34 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>{
     }
 }
 
+impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
+    pub async fn get_list_paket_soal(&self) -> Result<Vec<ListPaketSoal>, sqlx::Error> {
+        sqlx::query_as::<_, ListPaketSoal>(
+            r#"
+            SELECT 
+                ps.id as id_nama_paket_soal,
+            ps.nama_paket_soal,
+            ks.id as id_kategori_soal,
+            ks.nama_kategori AS kategori_soal,
+            COUNT(psi.soal_id) AS jumlah_soal
+        FROM 
+            paket_soal ps
+        JOIN 
+            kategori_soal ks ON ps.kategori_id = ks.id
+        LEFT JOIN 
+            paket_soal_items psi ON ps.id = psi.paket_soal_id
+        GROUP BY 
+            ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
+        ORDER BY 
+            ks.nama_kategori, ps.nama_paket_soal
+        "#,
+    )
+    .fetch_all(&*self.pool)
+    .await
+}
+
+}
+
 pub struct Database<'c> {
     pub soal: Arc<Table<'c, Soal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
@@ -116,3 +145,4 @@ impl<'a> Database<'a> {
         }
     }
 }
+

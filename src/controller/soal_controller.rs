@@ -6,7 +6,8 @@ use actix_web::{get, web, HttpResponse, Responder};
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(get_soal)
-       .service(get_paket_soal_response);
+       .service(get_paket_soal_response)
+       .service(get_list_paket_soal);
 }
 
 #[get("/soal/{id}")]
@@ -40,6 +41,23 @@ async fn get_paket_soal_response(
             HttpResponse::NotFound().finish()
         },
         Ok(paket_soal_response) => HttpResponse::Ok().json(paket_soal_response),
+    }
+}
+
+#[get("/listpaketsoal")]
+async fn get_list_paket_soal(
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("GET: /listpaketsoal", &app_state.connections);
+    
+    let list_paket_soal = app_state.context.paket_soal_response.get_list_paket_soal().await;
+
+    match list_paket_soal {
+        Err(e) => {
+            println!("Error: {:?}", e);
+            HttpResponse::InternalServerError().finish()
+        },
+        Ok(list_paket_soal) => HttpResponse::Ok().json(list_paket_soal),
     }
 }
 

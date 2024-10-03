@@ -1,8 +1,10 @@
 use actix_web::{web, App, HttpServer};
+use actix_cors::Cors;
 use quiz_backend::config::Config;
 use quiz_backend::dao::Database;
 use quiz_backend::{controller, AppState};
 use std::sync::{Arc, Mutex};
+use http::header;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -31,10 +33,18 @@ async fn main() -> std::io::Result<()> {
     // We'll need to transfer ownership of the AppState to the HttpServer via the `move`.
     // Then we can instantiate our controllers.
     let app = HttpServer::new(move || {
+        let cors = Cors::default()
+            .allowed_origin("https://kuis.canducation.com")
+            .allowed_origin("http://localhost:4200") // only for development
+            .allowed_methods(vec!["GET", "POST", "PUT", "DELETE"])
+            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
+            .allowed_header(header::CONTENT_TYPE)
+            .max_age(3600);
+
         App::new()
+            .wrap(cors)
             .app_data(app_state.clone())
             .configure(controller::init_soal_controller)
-      
     })
     .bind(config.get_app_url())?;
     println!("Listening on: {0}", config.get_app_url());

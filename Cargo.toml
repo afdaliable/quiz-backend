@@ -10,3 +10,19 @@ sqlx = { version = "0.7.1", features = ["mysql", "runtime-tokio"] }
 serde = "1.0.185"
 serde_json = "1.0.105"
 uuid = { version = "1.4.1", features = ["serde", "v4"] }
+actix-cors = "0.6.4"
+http = "0.2"
+
+
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.dev.build-override]
+opt-level = 3
+
+[profile.release]
+panic = "unwind"  # Strip expensive panic clean-up logic
+codegen-units = 1 # Compile crates one after another so the compiler can optimize better
+lto = true        # Enables link to optimizations
+opt-level = "s"   # Optimize for binary size
+strip = true      # Remove debug symbols
