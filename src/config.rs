@@ -1,22 +1,23 @@
 use serde::Deserialize;
 use std::fs;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct AppConfig {
     url: String,
     port: u16,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 struct DaoConfig {
     user: String,
     password: String,
     address: String,
     database: String,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Config {
     app: AppConfig,
     dao: DaoConfig,
+    api_key: String,
 }
 
 impl Config {
@@ -34,5 +35,9 @@ impl Config {
             "mysql://{0}:{1}@{2}/{3}",
             self.dao.user, self.dao.password, self.dao.address, self.dao.database
         )
+    }
+
+    pub fn get_api_key(&self) -> &str {
+        &self.api_key
     }
 }
