@@ -1,13 +1,15 @@
 use super::log_request;
 use super::AppState;
 
+use actix_web::web::service;
 // use crate::model::Soal;
 use actix_web::{get, web, HttpResponse, Responder};
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(get_soal)
        .service(get_paket_soal_response)
-       .service(get_list_paket_soal);
+       .service(get_list_paket_soal)
+        .service(get_all_soal);
 }
 
 #[get("/soal/{id}")]
@@ -61,5 +63,23 @@ async fn get_list_paket_soal(
     }
 }
 
+#[get("/kumpulan-soal")]
+async fn get_all_soal(
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("GET: /kumpulan-soal", &app_state.connections);
+
+    let soal = app_state.context.soal.get_all_soal().await;
+
+    match soal {
+        Err(e) =>{
+            println!("Error: {:?}", e);
+            HttpResponse::InternalServerError().finish()
+        },
+        Ok(soal) => HttpResponse::Ok().json(soal),
+    }
+    
+
+}
 
 // Kode yang dikomentari tetap tidak berubah

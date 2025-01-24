@@ -38,6 +38,17 @@ impl<'c> Table<'c, Soal> {
         .await
     }
 
+    pub async fn get_all_soal(&self) -> Result<Vec<Soal>, sqlx::Error> {
+        sqlx::query_as(
+            r#"
+            SELECT *
+            FROM soal 
+            Order BY id"#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+    }
+
     // pub async fn add_user(&self, user: &User) -> Result<u64, sqlx::Error> {
     //     sqlx::query(
     //         r#"
@@ -81,5 +92,6 @@ impl<'c> Table<'c, Soal> {
     //     .map(|x|x.rows_affected())
     // }
 
+    
 
 }
