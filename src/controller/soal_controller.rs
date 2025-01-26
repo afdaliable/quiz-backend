@@ -1,7 +1,6 @@
 use super::log_request;
 use super::AppState;
 
-use actix_web::web::service;
 // use crate::model::Soal;
 use actix_web::{get, web, HttpResponse, Responder};
 
