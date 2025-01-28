@@ -18,6 +18,9 @@ pub struct Config {
     app: AppConfig,
     dao: DaoConfig,
     api_key: String,
+    jwt_secret: String,
+    anon_key: String,
+    auth_url: String,
 }
 
 impl Config {
@@ -39,5 +42,17 @@ impl Config {
 
     pub fn get_api_key(&self) -> &str {
         &self.api_key
+    }
+
+    pub fn get_jwt_secret(&self) -> &str {
+        &self.jwt_secret
+    }
+
+    pub fn get_anon_key(&self) -> &str {
+        &self.anon_key
+    }
+
+    pub fn get_auth_url(&self) -> &str {
+        &self.auth_url
     }
 }

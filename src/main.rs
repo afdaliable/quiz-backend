@@ -5,12 +5,15 @@ use actix_cors::Cors;
 use quiz_backend::config::Config;
 use quiz_backend::dao::Database;
 use quiz_backend::{controller, AppState};
+use supabase_auth::models::SignUpWithPasswordOptions;
 use std::sync::{Arc, Mutex};
 use http::header;
 use crate::middleware::auth_middleware::AuthMiddleware;
+use supabase_auth::models::AuthClient;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
     println!("=== Quiz Backend ===");
 
     let config_file: &'static str = "config.json";
@@ -20,13 +23,22 @@ async fn main() -> std::io::Result<()> {
     let db_context = Database::new(&config.get_database_url()).await;
     println!("Connected to database: {0}", config.get_database_url());
 
+    let auth_client = AuthClient::new(
+        config.get_auth_url(),
+        config.get_anon_key(),
+        config.get_jwt_secret(),
+    );
+
     let app_state = web::Data::new(AppState {
         connections: Mutex::new(0),
         context: Arc::new(db_context),
+        config: config.clone(),
+        auth_client,
+        sign_up_with_password_options: SignUpWithPasswordOptions::default(),
     });
 
-    let app_url = config.get_app_url().to_owned();
-    let api_key = config.get_api_key().to_string();
+    let app_url = config.get_app_url();
+    let jwt_secret = config.get_jwt_secret().to_string();
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -39,9 +51,10 @@ async fn main() -> std::io::Result<()> {
 
         App::new()
             .wrap(cors)
-            .wrap(AuthMiddleware::new(api_key.clone()))
+            .wrap(AuthMiddleware::new(jwt_secret.clone()))
             .app_data(app_state.clone())
             .configure(controller::init_soal_controller)
+            .configure(controller::init_auth_controller)
     })
     .bind(app_url)?
     .run()

@@ -1,10 +1,15 @@
+use supabase_auth::models::{SignUpWithPasswordOptions, AuthClient};
+
 use crate::dao::Database;
+use crate::config::Config;
 use std::sync::{Arc, Mutex};
 
 pub mod config;
 pub mod controller;
 pub mod dao;
 pub mod model;
+
+
 
 // AppState
 // This the primary dependency for our application's dependency injection.
@@ -13,4 +18,7 @@ pub mod model;
 pub struct AppState<'a> {
     pub connections: Mutex<u32>,
     pub context: Arc<Database<'a>>,
+    pub config: Arc<Config>,
+    pub auth_client: AuthClient,
+    pub sign_up_with_password_options: SignUpWithPasswordOptions,
 }
