@@ -14,21 +14,12 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v3
 
-    - name: Set up Rust
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Build Rust project
-      run: cargo build --release
-
-    - name: Run tests
-      run: cargo test
-
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Build Docker image
+    - name: Build Docker Image
       run: |
-        docker build -t ghcr.io/${{ github.repository }}/rust-app:latest .
+        docker build -t ghcr.io/${{ github.repository }}/quiz-backend:latest .
 
     - name: Log in to GitHub Container Registry
       uses: docker/login-action@v2
@@ -39,8 +30,13 @@ jobs:
 
     - name: Push Docker image to GHCR
       run: |
-        docker push ghcr.io/${{ github.repository }}/rust-app:latest
+        docker push ghcr.io/${{ github.repository }}/quiz-backend:latest
 
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
     - name: Deploy to Synology via SSH
       env:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
@@ -51,9 +47,11 @@ jobs:
         echo "$SSH_PRIVATE_KEY" > private_key.pem
         chmod 600 private_key.pem
         ssh -i private_key.pem -o StrictHostKeyChecking=no -p $SSH_PORT $SSH_USER@$SSH_HOST "
-          docker pull ghcr.io/${{ github.repository }}/rust-app:latest &&
-          docker stop rust-app || true &&
-          docker rm rust-app || true &&
-          docker run -d --name rust-app -p 8787:8787 ghcr.io/${{ github.repository }}/rust-app:latest
+          docker pull ghcr.io/${{ github.repository }}/quiz-backend:latest &&
+          docker stop quiz-backend || true &&
+          docker rm quiz-backend || true &&
+          docker run -d --name quiz-backend -p 8000:8000 \
+            -v /:/app/config.json \
+            ghcr.io/${{ github.repository }}/quiz-backend:latest
         "
         rm -f private_key.pem
