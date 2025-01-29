@@ -18,6 +18,5 @@ COPY --from=build /etc/passwd /etc/passwd
 COPY --from=build /etc/group /etc/group
 WORKDIR /app
 COPY --from=build /app/target/release/quiz-backend ./
-COPY config.json ./
-EXPOSE 8000
+EXPOSE 8787
 CMD ["./quiz-backend"]
