@@ -21,7 +21,7 @@ async fn main() -> std::io::Result<()> {
     println!("Using configuration file from {0}", config_file);
 
     let db_context = Database::new(&config.get_database_url()).await;
-    println!("Connected to database: {0}", config.get_database_url());
+    println!("test ci //Connected to database: {0}", config.get_database_url());
 
     let auth_client = AuthClient::new(
         config.get_auth_url(),
