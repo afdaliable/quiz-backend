@@ -37,15 +37,26 @@ jobs:
     needs: build
 
     steps:
+    - name: Install Tailscale
+      run: |
+        curl -fsSL https://tailscale.com/install.sh | sh
+
+    - name: Authenticate with Tailscale
+      run: |
+        sudo tailscale up --authkey=$TAILSCALE_AUTH_KEY
+
     - name: Deploy to Synology via SSH
       env:
         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         SSH_HOST: ${{ secrets.SSH_HOST }}
         SSH_PORT: ${{ secrets.SSH_PORT }}
         SSH_USER: ${{ secrets.SSH_USER }}
+        TAILSCALE_AUTH_KEY: ${{ secrets.TAILSCALE_AUTH_KEY }}
       run: |
         echo "$SSH_PRIVATE_KEY" > private_key.pem
         chmod 600 private_key.pem
+        
+        # Use SSH_HOST directly (Tailscale IP) for SSH connection
         ssh -i private_key.pem -o StrictHostKeyChecking=no -p $SSH_PORT $SSH_USER@$SSH_HOST "
           docker pull ghcr.io/${{ github.repository }}/quiz-backend:latest &&
           docker stop quiz-backend || true &&
@@ -55,3 +66,5 @@ jobs:
             ghcr.io/${{ github.repository }}/quiz-backend:latest
         "
         rm -f private_key.pem
+
+    
