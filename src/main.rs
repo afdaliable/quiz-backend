@@ -45,8 +45,13 @@ async fn main() -> std::io::Result<()> {
             .allowed_origin("https://kuis.canducation.com")
             .allowed_origin("http://localhost:4200")
             .allowed_methods(vec!["GET", "POST"])
-            .allowed_headers(vec![header::AUTHORIZATION, header::ACCEPT])
-            .allowed_header(header::CONTENT_TYPE)
+            .allowed_headers(vec![
+                header::AUTHORIZATION,
+                header::ACCEPT,
+                header::CONTENT_TYPE
+            ])
+            .expose_headers(vec![header::AUTHORIZATION])
+            .supports_credentials()
             .max_age(3600);
 
         App::new()
