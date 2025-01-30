@@ -59,7 +59,7 @@ jobs:
     runs-on: self-hosted  
     steps:
       - name: Pull Image Baru
-        run: docker pull ghcr.io/afdaliable/quiz-backend-prod:latest
+        run: docker pull ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest
 
       - name: Hentikan & Hapus Container Lama
         run: |
