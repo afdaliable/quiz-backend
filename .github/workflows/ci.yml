@@ -36,11 +36,12 @@ jobs:
 
     - name: Build and Push Docker Image
       run: |
-        docker build -t ghcr.io/${{ github.repository }}/quiz-backend:latest -t ghcr.io/${{ github.repository }}/quiz-backend:${{ env.VERSION }} .
+        docker build -t ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest -t ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:${{ env.VERSION }} .
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest .
 
-        docker push ghcr.io/${{ github.repository }}/quiz-backend:latest
-        docker push ghcr.io/${{ github.repository }}/quiz-backend:${{ env.VERSION }}
+        
+        docker push ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest
+        docker push ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:${{ env.VERSION }}
 
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest
 
