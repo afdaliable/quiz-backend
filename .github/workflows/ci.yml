@@ -36,22 +36,19 @@ jobs:
 
     - name: Build and Push Docker Image
       run: |
-        docker build -t ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest -t ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:${{ env.VERSION }} .
+        docker build -t ghcr.io/afdaliable/quiz-backend-prod:latest -t ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }} .
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest .
-
         
-        docker push ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest
-        docker push ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:${{ env.VERSION }}
-
+        docker push ghcr.io/afdaliable/quiz-backend-prod:latest
+        docker push ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }}
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest
 
     - name: Delete old images from GHCR
       run: |
         gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
-        REPO="ghcr.io/${{ github.repository }}/quiz-backend"
-        IMAGES=$(gh api "orgs/${{ github.repository_owner }}/packages/container/quiz-backend/versions" | jq -r '.[].id' | tail -n +3)
+        IMAGES=$(gh api "orgs/${{ github.repository_owner }}/packages/container/quiz-backend-prod/versions" | jq -r '.[].id' | tail -n +3)
         for IMG in $IMAGES; do
-          gh api --method DELETE "orgs/${{ github.repository_owner }}/packages/container/quiz-backend/versions/$IMG"
+          gh api --method DELETE "orgs/${{ github.repository_owner }}/packages/container/quiz-backend-prod/versions/$IMG"
         done
   
   deploy:
@@ -63,7 +60,7 @@ jobs:
         run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
       - name: Pull Image Baru
-        run: docker pull ghcr.io/afdaliable/quiz-backend-prod/quiz-backend:latest
+        run: docker pull ghcr.io/afdaliable/quiz-backend-prod:latest
 
       - name: Hentikan & Hapus Container Lama
         run: |
