@@ -70,5 +70,5 @@ jobs:
       - name: Jalankan Container Baru
         run: |
           docker run -d --name quiz-backend -p 8787:8787 \
-            -v /docker/quiz-backend/app/config.json:/app/config.json \
+            -v /volume1/docker/quiz/backend/app/config.json:/app/config.json \
             ghcr.io/afdaliable/quiz-backend-prod:latest
