@@ -6,6 +6,7 @@ mod paket_soal_response;
 mod list_paket_soal;
 mod auth;
 pub type Soal = soal::Soal;
+pub type CreateSoalRequest = soal::CreateSoalRequest;
 pub type KategoriSoal = kategori_soal::KategoriSoal;
 pub type PaketSoal = paket_soal::PaketSoal;
 pub type PaketSoalItem = paket_soal_item::PaketSoalItem;

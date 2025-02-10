@@ -2,13 +2,15 @@ use super::log_request;
 use super::AppState;
 
 // use crate::model::Soal;
-use actix_web::{get, web, HttpResponse, Responder};
+use actix_web::{get, post, web, HttpResponse, Responder};
+use crate::model::CreateSoalRequest;
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(get_soal)
        .service(get_paket_soal_response)
        .service(get_list_paket_soal)
-        .service(get_all_soal);
+        .service(get_all_soal)
+        .service(create_soal);
 }
 
 #[get("/soal/{id}")]
@@ -78,7 +80,26 @@ async fn get_all_soal(
         Ok(soal) => HttpResponse::Ok().json(soal),
     }
     
-
 }
+
+#[post("/soal")]
+async fn create_soal(
+    app_state: web::Data<AppState<'_>>,
+    payload: web::Json<CreateSoalRequest>,
+) -> impl Responder {
+    println!("Received POST request to /soal");  // Add this line
+    log_request("POST: /soal", &app_state.connections);
+
+    let result = app_state.context.soal.create_soal(&payload).await;
+
+    match result {
+        Ok(soal) => HttpResponse::Created().json(soal),
+        Err(e) => {
+            println!("Error creating soal : {:?}", e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 
 // Kode yang dikomentari tetap tidak berubah

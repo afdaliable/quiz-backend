@@ -16,6 +16,18 @@ pub struct Soal {
     pub solution: String,
 }
 
+#[derive(Debug,Deserialize, Serialize)]
+pub struct CreateSoalRequest{
+    pub soal: String,
+    pub opt1: String,
+    pub opt2: String,
+    pub opt3: String,
+    pub opt4: String,
+    pub opt5: String,
+    pub correct_answer: String,
+    pub solution: String,
+}
+
 impl<'c> FromRow<'c, MySqlRow> for Soal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(Soal {
