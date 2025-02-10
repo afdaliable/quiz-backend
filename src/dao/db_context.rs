@@ -4,6 +4,7 @@ use super::PaketSoal;
 use super::PaketSoalItem;
 use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
+use crate::model::User;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -129,6 +130,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
 
 pub struct Database<'c> {
     pub soal: Arc<Table<'c, Soal>>,
+    pub users: Arc<Table<'c, User>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
 }
 
@@ -138,10 +140,9 @@ impl<'a> Database<'a> {
         let pool = Arc::new(connection);
 
         Database {
-            // groups: Arc::from(Table::new(pool.clone())),
             soal: Arc::from(Table::new(pool.clone())),
+            users: Arc::from(Table::new(pool.clone())),
             paket_soal_response: Arc::from(JoinTable::new(pool.clone())),
-            // users_to_groups: Arc::from(JoinTable::new(pool.clone())),
         }
     }
 }

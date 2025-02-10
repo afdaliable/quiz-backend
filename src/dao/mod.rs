@@ -2,11 +2,12 @@ use super::model::Soal;
 use super::model::KategoriSoal;
 use super::model::PaketSoal;
 use super::model::PaketSoalItem;
-
 pub mod db_context;
+//use super::model::User;
 // mod group_dao;
 mod soal_dao;
 mod paket_soal_response;
+mod user_dao;
 // mod user_to_group_dao;
 
 pub use db_context::Database;

@@ -52,25 +52,48 @@ async fn signup(
     
     options.data = Some(user_metadata);
 
+    // First attempt Supabase signup
     match app_state.auth_client.sign_up_with_email_and_password(
         &signup_req.email,
         &signup_req.password,
         Some(options)
     ).await {
         Ok(session) => {
-            let display_name = signup_req.display_name.clone();
-            let response = AuthResponse {
-                access_token: session.access_token,
-                token_type: "bearer".to_string(),
-                expires_in: 3600,
-                refresh_token: session.refresh_token,
-                user: SupabaseUser {
-                    id: session.user.id,
-                    email: session.user.email,
-                    display_name,
+            // After successful Supabase signup, store user in local database
+            let user_id = session.user.id.clone();
+            let result = sqlx::query(
+                r#"
+                INSERT INTO users (id, email, display_name)
+                VALUES (?, ?, ?)
+                "#
+            )
+            .bind(&user_id)
+            .bind(&signup_req.email)
+            .bind(&signup_req.display_name)
+            .execute(&*app_state.context.users.pool)
+            .await;
+
+            match result {
+                Ok(_) => {
+                    let display_name = signup_req.display_name.clone();
+                    let response = AuthResponse {
+                        access_token: session.access_token,
+                        token_type: "bearer".to_string(),
+                        expires_in: 3600,
+                        refresh_token: session.refresh_token,
+                        user: SupabaseUser {
+                            id: session.user.id,
+                            email: session.user.email,
+                            display_name,
+                        }
+                    };
+                    HttpResponse::Ok().json(response)
+                },
+                Err(e) => {
+                    eprintln!("Database error: {:?}", e);
+                    HttpResponse::InternalServerError().body("Failed to store user data")
                 }
-            };
-            HttpResponse::Ok().json(response)
+            }
         },
         Err(e) => {
             eprintln!("Signup error: {:?}", e);
@@ -89,27 +112,39 @@ async fn login(
         &login_req.password
     ).await {
         Ok(session) => {
-            // For login, we'll get display_name from user_metadata if it exists
-            let display_name = serde_json::to_value(session.user.user_metadata)
-                .unwrap_or(serde_json::Value::Null)
-                .as_object()
-                .and_then(|obj| obj.get("display_name"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            let response = AuthResponse {
-                access_token: session.access_token,
-                token_type: "bearer".to_string(),
-                expires_in: 3600,
-                refresh_token: session.refresh_token,
-                user: SupabaseUser {
-                    id: session.user.id,
-                    email: session.user.email,
-                    display_name,
+            // After Supabase authentication, fetch user from our database
+            match app_state.context.users.get_user_by_email(&login_req.email).await {
+                Ok(local_user) => {
+                    let response = AuthResponse {
+                        access_token: session.access_token,
+                        token_type: "bearer".to_string(),
+                        expires_in: 3600,
+                        refresh_token: session.refresh_token,
+                        user: SupabaseUser {
+                            id: session.user.id,
+                            email: session.user.email,
+                            display_name: local_user.display_name,
+                        }
+                    };
+                    HttpResponse::Ok().json(response)
+                },
+                Err(e) => {
+                    eprintln!("Failed to fetch user data: {:?}", e);
+                    // Still return auth response but with empty display_name
+                    let response = AuthResponse {
+                        access_token: session.access_token,
+                        token_type: "bearer".to_string(),
+                        expires_in: 3600,
+                        refresh_token: session.refresh_token,
+                        user: SupabaseUser {
+                            id: session.user.id,
+                            email: session.user.email,
+                            display_name: String::new(),
+                        }
+                    };
+                    HttpResponse::Ok().json(response)
                 }
-            };
-            HttpResponse::Ok().json(response)
+            }
         },
         Err(e) => {
             eprintln!("Login error: {:?}", e);

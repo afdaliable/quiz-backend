@@ -3,6 +3,7 @@ use supabase_auth::models::{SignUpWithPasswordOptions, AuthClient};
 use crate::dao::Database;
 use crate::config::Config;
 use std::sync::{Arc, Mutex};
+//use sqlx::MySqlPool;
 
 pub mod config;
 pub mod controller;
