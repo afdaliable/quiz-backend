@@ -42,17 +42,20 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let cors = Cors::default()
-                        .allowed_origin("https://kuis.canducation.com")
-                        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
-                        .allowed_headers(vec![
-                            header::AUTHORIZATION,
-                            header::CONTENT_TYPE,
-                            header::ACCEPT,
-                            header::ORIGIN,
-                        ])
-                        .expose_headers(vec!["Authorization"])
-                        .max_age(3600)
-                        .supports_credentials();
+        .allowed_origin("https://kuis.canducation.com")
+        .allowed_origin("https://quiz-backend.afdaliable.dev")
+        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+        .allowed_headers(vec![
+        header::AUTHORIZATION,
+        header::CONTENT_TYPE,
+        header::ACCEPT,
+        header::ORIGIN,
+        header::ACCESS_CONTROL_REQUEST_METHOD,
+        header::ACCESS_CONTROL_REQUEST_HEADERS,
+    ])
+    .expose_headers(vec!["Authorization"])
+    .max_age(3600)
+    .supports_credentials();
 
         App::new()
             .wrap(cors)
