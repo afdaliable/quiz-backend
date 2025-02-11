@@ -42,16 +42,17 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let cors = Cors::default()
-            .allowed_origin("https://kuis.canducation.com")
-            .allowed_origin("http://localhost:4200")
-            .allowed_methods(vec!["GET", "POST","OPTIONS"])
-            .allowed_headers(vec![
-                header::AUTHORIZATION,
-                header::ACCEPT,
-                header::CONTENT_TYPE
-            ])
-            .supports_credentials()
-            .max_age(3600);
+                        .allowed_origin("https://kuis.canducation.com")
+                        .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+                        .allowed_headers(vec![
+                            header::AUTHORIZATION,
+                            header::CONTENT_TYPE,
+                            header::ACCEPT,
+                            header::ORIGIN,
+                        ])
+                        .expose_headers(vec!["Authorization"])
+                        .max_age(3600)
+                        .supports_credentials();
 
         App::new()
             .wrap(cors)
