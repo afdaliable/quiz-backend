@@ -44,13 +44,12 @@ async fn main() -> std::io::Result<()> {
         let cors = Cors::default()
             .allowed_origin("https://kuis.canducation.com")
             .allowed_origin("http://localhost:4200")
-            .allowed_methods(vec!["GET", "POST"])
+            .allowed_methods(vec!["GET", "POST","OPTIONS"])
             .allowed_headers(vec![
                 header::AUTHORIZATION,
                 header::ACCEPT,
                 header::CONTENT_TYPE
             ])
-            .expose_headers(vec![header::AUTHORIZATION])
             .supports_credentials()
             .max_age(3600);
 
