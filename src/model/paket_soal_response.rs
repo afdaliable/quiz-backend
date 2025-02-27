@@ -2,8 +2,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
 use super::Soal;
+use utoipa::ToSchema;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct PaketSoalResponse {
     pub kategori_id: i32,
     pub nama_kategori: String,
@@ -11,6 +12,8 @@ pub struct PaketSoalResponse {
     pub nama_paket_soal: String,
     pub kumpulan_soal: Vec<Soal>
 }
+
+
 
 impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {

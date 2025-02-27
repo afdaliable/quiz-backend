@@ -18,9 +18,8 @@ dotenv = "0.15.0"
 jsonwebtoken = "9.3.0"
 reqwest = { version = "0.11", features = ["json"] }
 chrono = { version = "0.4", features = ["serde"] }
-
-[profile.dev]
-split-debuginfo = "unpacked"
+utoipa = { version = "4", features = ["actix_extras"] }
+utoipa-swagger-ui = { version = "6", features = ["actix-web"] }
 
 [profile.dev.build-override]
 opt-level = 3
@@ -31,3 +30,4 @@ codegen-units = 1 # Compile crates one after another so the compiler can optimiz
 lto = true        # Enables link to optimizations
 opt-level = "s"   # Optimize for binary size
 strip = true      # Remove debug symbols
+split-debuginfo = "unpacked"

@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 use http::header;
 use crate::middleware::auth_middleware::AuthMiddleware;
 use supabase_auth::models::AuthClient;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
+use quiz_backend::docs::ApiDoc;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -64,6 +67,10 @@ async fn main() -> std::io::Result<()> {
             .app_data(app_state.clone())
             .configure(controller::init_soal_controller)
             .configure(controller::init_auth_controller)
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/api-docs/openapi.json", ApiDoc::openapi()),
+            )
     })
     .bind(app_url)?
     .run()

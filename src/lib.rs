@@ -9,6 +9,9 @@ pub mod config;
 pub mod controller;
 pub mod dao;
 pub mod model;
+pub mod docs;
+pub mod middleware;
+
 
 
 

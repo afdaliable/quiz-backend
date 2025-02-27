@@ -13,6 +13,21 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         .service(create_soal);
 }
 
+/// Get a specific soal by ID
+#[utoipa::path(
+    get,
+    path = "/soal/{id}",
+    responses(
+        (status = 200, description = "Soal found successfully", body = Soal),
+        (status = 404, description = "Soal not found")
+    ),
+    params(
+        ("id" = String, Path, description = "Soal identifier")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
 #[get("/soal/{id}")]
 async fn get_soal(
     soal_id: web::Path<String>,
@@ -28,6 +43,22 @@ async fn get_soal(
     }
 }
 
+/// Get paket soal response by category and package name
+#[utoipa::path(
+    get,
+    path = "/paket-soal-response/{nama_kategori}/{nama_paket_soal}",
+    responses(
+        (status = 200, description = "Paket soal found successfully", body = PaketSoalResponse),
+        (status = 404, description = "Paket soal not found")
+    ),
+    params(
+        ("nama_kategori" = String, Path, description = "Category name"),
+        ("nama_paket_soal" = String, Path, description = "Package name")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
 #[get("/paket-soal-response/{nama_kategori}/{nama_paket_soal}")]
 async fn get_paket_soal_response(
     path: web::Path<(String, String)>,
@@ -47,6 +78,18 @@ async fn get_paket_soal_response(
     }
 }
 
+/// Get List of all Paket Soal
+#[utoipa::path(
+    get,
+    path = "/listpaketsoal",
+    responses(
+        (status = 200, description = "List of paket soal retrieved successfully", body = ListPaketSoal),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
 #[get("/listpaketsoal")]
 async fn get_list_paket_soal(
     app_state: web::Data<AppState<'_>>,
@@ -64,6 +107,18 @@ async fn get_list_paket_soal(
     }
 }
 
+/// Get all soal (questions)
+#[utoipa::path(
+    get,
+    path = "/kumpulan-soal",
+    responses(
+        (status = 200, description = "List all soal successfully", body = Vec<Soal>),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
 #[get("/kumpulan-soal")]
 async fn get_all_soal(
     app_state: web::Data<AppState<'_>>,
@@ -82,6 +137,19 @@ async fn get_all_soal(
     
 }
 
+/// Create a new soal
+#[utoipa::path(
+    post,
+    path = "/soal",
+    request_body = CreateSoalRequest,
+    responses(
+        (status = 201, description = "Soal created successfully", body = Soal),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
 #[post("/soal")]
 async fn create_soal(
     app_state: web::Data<AppState<'_>>,

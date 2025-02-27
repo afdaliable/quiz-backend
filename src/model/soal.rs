@@ -2,29 +2,49 @@
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
+use utoipa::ToSchema;
 
-#[derive(Serialize, Deserialize, Clone)]
+/// Represents a Soal (Question) entity
+#[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct Soal {
+    /// Unique identifier for the soal
     pub id: i32,
+    /// The question text
     pub soal: String,
+    /// First option
     pub opt1: String,
+    /// Second option
     pub opt2: String,
+    /// Third option
     pub opt3: String,
+    /// Fourth option
     pub opt4: String,
+    /// Fifth option
     pub opt5: String,
+    /// The correct answer
     pub correct_answer: String,
+    /// Solution explanation
     pub solution: String,
 }
 
-#[derive(Debug,Deserialize, Serialize)]
-pub struct CreateSoalRequest{
+/// Request payload for creating a new soal
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CreateSoalRequest {
+    /// Question text
     pub soal: String,
+    /// First option
     pub opt1: String,
+    /// Second option
     pub opt2: String,
+    /// Third option
     pub opt3: String,
+    /// Fourth option
     pub opt4: String,
+    /// Fifth option
     pub opt5: String,
+    /// The correct answer
     pub correct_answer: String,
+    /// Solution explanation
     pub solution: String,
 }
 

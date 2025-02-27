@@ -1,42 +1,26 @@
 use actix_web::{post, web, HttpResponse, Responder};
-use serde::{Deserialize, Serialize};
-use crate::AppState;
 use serde_json::json;
-
-#[derive(Debug, Deserialize)]
-struct SignUpRequest {
-    email: String,
-    password: String,
-    display_name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoginRequest {
-    email: String,
-    password: String,
-}
-
-#[derive(Debug, Serialize)]
-struct AuthResponse {
-    access_token: String,
-    token_type: String,
-    expires_in: i32,
-    refresh_token: String,
-    user: SupabaseUser,
-}
-
-#[derive(Debug, Serialize)]
-struct SupabaseUser {
-    id: String,
-    email: String,
-    display_name: String,
-}
+use crate::AppState;
+use crate::model::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(signup)
        .service(login);
 }
 
+/// Register a new user
+#[utoipa::path(
+    post,
+    path = "/signup",
+    request_body = SignUpRequest,
+    responses(
+        (status = 200, description = "User successfully registered", body = AuthResponse),
+        (status = 400, description = "Invalid registration data"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "auth",
+    security() // Empty security means no authentication required
+)]
 #[post("/signup")]
 async fn signup(
     signup_req: web::Json<SignUpRequest>,
@@ -102,6 +86,19 @@ async fn signup(
     }
 }
 
+/// Login with email and password
+#[utoipa::path(
+    post,
+    path = "/auth/v1/token",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = AuthResponse),
+        (status = 400, description = "Invalid credentials"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "auth",
+    security() // Empty security means no authentication required
+)]
 #[post("/auth/v1/token")]
 async fn login(
     login_req: web::Json<LoginRequest>,

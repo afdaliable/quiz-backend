@@ -44,9 +44,11 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 2] = [
-    "/auth/v1/token",
+const PUBLIC_ROUTES: [&str; 4] = [
     "/signup",
+    "/auth/v1/token",
+    "/swagger-ui",
+    "/api-docs/openapi.json"
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
