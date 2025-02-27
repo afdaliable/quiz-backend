@@ -1,7 +1,7 @@
 use utoipa::OpenApi;
 use crate::model::{
     Soal, CreateSoalRequest, SignUpRequest, LoginRequest, 
-    AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal
+    AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal, KategoriSoal
 };
 
 #[derive(OpenApi)]
@@ -9,17 +9,19 @@ use crate::model::{
     paths(
         crate::controller::soal_controller::get_soal,
         crate::controller::soal_controller::get_paket_soal_response,
+        crate::controller::soal_controller::get_paket_soal_by_category,
         crate::controller::soal_controller::get_list_paket_soal,
         crate::controller::soal_controller::get_all_soal,
         crate::controller::soal_controller::create_soal,
         crate::controller::auth_controller::signup,
         crate::controller::auth_controller::login,
+        crate::controller::kategori_controller::get_semua_kategori,
     ),
     components(
         schemas(
             Soal, CreateSoalRequest, 
             SignUpRequest, LoginRequest, AuthResponse, SupabaseUser,
-            PaketSoalResponse, ListPaketSoal
+            PaketSoalResponse, ListPaketSoal, KategoriSoal
         )
     ),
     tags(

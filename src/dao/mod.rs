@@ -8,6 +8,7 @@ pub mod db_context;
 mod soal_dao;
 mod paket_soal_response;
 mod user_dao;
+mod kategori_soal_dao;
 // mod user_to_group_dao;
 
 pub use db_context::Database;

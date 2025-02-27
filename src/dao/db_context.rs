@@ -72,7 +72,23 @@ where
     }
 }
 
-impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>{
+impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
+    pub async fn get_list_paket_soal(&self) -> Result<Vec<ListPaketSoal>, sqlx::Error> {
+        sqlx::query_as::<_, ListPaketSoal>(
+            r#"
+            SELECT ps.id as id_nama_paket_soal, ps.nama_paket_soal,
+                   ks.id as id_kategori_soal, ks.nama_kategori as kategori_soal,
+                   COUNT(psi.soal_id) as jumlah_soal
+            FROM paket_soal ps
+            JOIN kategori_soal ks ON ps.kategori_id = ks.id
+            LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+    }
+
     pub async fn get_paket_soal_response(&self, nama_kategori: &String, nama_paket_soal: &String) -> Result<PaketSoalResponse, sqlx::Error> {
         let mut results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
@@ -98,39 +114,47 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>{
         response.kumpulan_soal.extend(results.into_iter().flat_map(|r| r.kumpulan_soal));
         Ok(response)
     }
-}
 
-impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
-    pub async fn get_list_paket_soal(&self) -> Result<Vec<ListPaketSoal>, sqlx::Error> {
-        sqlx::query_as::<_, ListPaketSoal>(
+    pub async fn get_paket_soal_by_category(&self, nama_kategori: &String) -> Result<Vec<PaketSoalResponse>, sqlx::Error> {
+        let results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
-            SELECT 
-                ps.id as id_nama_paket_soal,
-            ps.nama_paket_soal,
-            ks.id as id_kategori_soal,
-            ks.nama_kategori AS kategori_soal,
-            COUNT(psi.soal_id) AS jumlah_soal
-        FROM 
-            paket_soal ps
-        JOIN 
-            kategori_soal ks ON ps.kategori_id = ks.id
-        LEFT JOIN 
-            paket_soal_items psi ON ps.id = psi.paket_soal_id
-        GROUP BY 
-            ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
-        ORDER BY 
-            ks.nama_kategori, ps.nama_paket_soal
-        "#,
-    )
-    .fetch_all(&*self.pool)
-    .await
-}
+            SELECT ks.id as kategori_id, ks.nama_kategori, 
+                   ps.id as paket_soal_id, ps.nama_paket_soal,
+                   s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, 
+                   s.opt4, s.opt5, s.correct_answer, s.solution
+            FROM kategori_soal ks 
+            JOIN paket_soal ps ON ks.id = ps.kategori_id 
+            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
+            JOIN soal s ON psi.soal_id = s.id 
+            WHERE ks.nama_kategori = ?
+            ORDER BY ps.nama_paket_soal, s.id
+            "#,
+        )
+        .bind(nama_kategori)
+        .fetch_all(&*self.pool)
+        .await?;
 
+        if results.is_empty() {
+            return Err(sqlx::Error::RowNotFound);
+        }
+
+        let mut grouped_responses: std::collections::HashMap<i32, PaketSoalResponse> = std::collections::HashMap::new();
+        
+        for result in results {
+            grouped_responses
+                .entry(result.paket_soal_id)
+                .and_modify(|e| e.kumpulan_soal.extend(result.kumpulan_soal.clone()))
+                .or_insert(result);
+        }
+
+        Ok(grouped_responses.into_values().collect())
+    }
 }
 
 pub struct Database<'c> {
     pub soal: Arc<Table<'c, Soal>>,
     pub users: Arc<Table<'c, User>>,
+    pub kategori:Arc<Table<'c, KategoriSoal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
 }
 
@@ -142,6 +166,7 @@ impl<'a> Database<'a> {
         Database {
             soal: Arc::from(Table::new(pool.clone())),
             users: Arc::from(Table::new(pool.clone())),
+            kategori: Arc::from(Table::new(pool.clone())),
             paket_soal_response: Arc::from(JoinTable::new(pool.clone())),
         }
     }

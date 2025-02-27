@@ -67,6 +67,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(app_state.clone())
             .configure(controller::init_soal_controller)
             .configure(controller::init_auth_controller)
+            .configure(controller::init_kategori_controller)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

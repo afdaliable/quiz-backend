@@ -8,6 +8,7 @@ use crate::model::CreateSoalRequest;
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(get_soal)
        .service(get_paket_soal_response)
+       .service(get_paket_soal_by_category)
        .service(get_list_paket_soal)
         .service(get_all_soal)
         .service(create_soal);
@@ -169,5 +170,40 @@ async fn create_soal(
     }
 }
 
+/// Get paket soal responses by category
+#[utoipa::path(
+    get,
+    path = "/paket-soal-response/{nama_kategori}",
+    responses(
+        (status = 200, description = "List of paket soal found successfully", body = Vec<PaketSoalResponse>),
+        (status = 404, description = "Category not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    params(
+        ("nama_kategori" = String, Path, description = "Category name")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[get("/paket-soal-response/{nama_kategori}")]
+async fn get_paket_soal_by_category(
+    nama_kategori: web::Path<String>,
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("GET: /paket-soal-response/{nama_kategori}", &app_state.connections);
+    
+    let paket_soal_responses = app_state.context.paket_soal_response
+        .get_paket_soal_by_category(&nama_kategori)
+        .await;
+
+    match paket_soal_responses {
+        Ok(responses) => HttpResponse::Ok().json(responses),
+        Err(e) => {
+            println!("Error: {:?}", e);
+            HttpResponse::NotFound().finish()
+        }
+    }
+}
 
 // Kode yang dikomentari tetap tidak berubah
