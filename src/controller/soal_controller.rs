@@ -10,6 +10,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
        .service(get_paket_soal_response)
        .service(get_paket_soal_by_category)
        .service(get_list_paket_soal)
+       .service(get_list_paket_soal_lengkap)
         .service(get_all_soal)
         .service(create_soal);
 }
@@ -203,6 +204,35 @@ async fn get_paket_soal_by_category(
             println!("Error: {:?}", e);
             HttpResponse::NotFound().finish()
         }
+    }
+}
+
+/// Get List of all Paket Soal with pricing information
+#[utoipa::path(
+    get,
+    path = "/listpaketsoallengkap",
+    responses(
+        (status = 200, description = "List of paket soal with pricing retrieved successfully", body = Vec<ListPaketSoalLengkap>),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[get("/listpaketsoallengkap")]
+async fn get_list_paket_soal_lengkap(
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("GET: /listpaketsoallengkap", &app_state.connections);
+    
+    let list_paket_soal = app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await;
+
+    match list_paket_soal {
+        Err(e) => {
+            println!("Error: {:?}", e);
+            HttpResponse::InternalServerError().finish()
+        },
+        Ok(list_paket_soal) => HttpResponse::Ok().json(list_paket_soal),
     }
 }
 

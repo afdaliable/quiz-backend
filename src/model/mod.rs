@@ -4,6 +4,8 @@ mod paket_soal;
 mod paket_soal_item;
 mod paket_soal_response;
 mod list_paket_soal;
+mod list_paket_soal_lengkap;
+mod harga_paket;
 pub mod auth;
 mod users;
 
@@ -14,5 +16,7 @@ pub type PaketSoal = paket_soal::PaketSoal;
 pub type PaketSoalItem = paket_soal_item::PaketSoalItem;
 pub type PaketSoalResponse = paket_soal_response::PaketSoalResponse;
 pub type ListPaketSoal = list_paket_soal::ListPaketSoal;
+pub type ListPaketSoalLengkap = list_paket_soal_lengkap::ListPaketSoalLengkap;
+pub type HargaPaket = harga_paket::HargaPaket;
 pub use auth::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 pub use users::User;

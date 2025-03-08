@@ -5,6 +5,7 @@ use super::PaketSoalItem;
 use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
 use crate::model::User;
+use crate::model::ListPaketSoalLengkap;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -83,6 +84,26 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
             GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+    }
+
+    pub async fn get_list_paket_soal_lengkap(&self) -> Result<Vec<ListPaketSoalLengkap>, sqlx::Error> {
+        sqlx::query_as::<_, ListPaketSoalLengkap>(
+            r#"
+            SELECT ps.id as id_nama_paket_soal, ps.nama_paket_soal,
+                   ks.id as id_kategori_soal, ks.nama_kategori as kategori_soal,
+                   COUNT(psi.soal_id) as jumlah_soal,
+                   COALESCE(hp.koin, 0) as koin,
+                   COALESCE(hp.harga, 0) as harga,
+                   COALESCE(hp.is_free, FALSE) as is_free
+            FROM paket_soal ps
+            JOIN kategori_soal ks ON ps.kategori_id = ks.id
+            LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
+            LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free
             "#,
         )
         .fetch_all(&*self.pool)
