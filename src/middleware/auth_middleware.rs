@@ -5,8 +5,9 @@ use std::task::{Context, Poll};
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 
+// Supabase JWT Claims
 #[derive(Debug, Serialize, Deserialize)]
-struct Claims {
+struct SupabaseClaims {
     // Required fields from Supabase
     aud: String,
     exp: usize,
@@ -17,6 +18,15 @@ struct Claims {
     iat: Option<usize>,
     app_metadata: Option<AppMetadata>,
     user_metadata: Option<UserMetadata>,
+}
+
+// Google OAuth JWT Claims
+#[derive(Debug, Serialize, Deserialize)]
+struct GoogleClaims {
+    sub: String,
+    exp: usize,
+    email: String,
+    name: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -44,11 +54,12 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 4] = [
+const PUBLIC_ROUTES: [&str; 5] = [
     "/signup",
     "/auth/v1/token",
     "/swagger-ui",
-    "/api-docs/openapi.json"
+    "/api-docs/openapi.json",
+    "/auth/google/callback"
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
@@ -105,33 +116,52 @@ where
                     if auth_str.starts_with("Bearer ") {
                         let token = &auth_str[7..];
                         
-                        let mut validation = Validation::new(Algorithm::HS256);
-                        validation.validate_exp = true;
-                        validation.set_audience(&["authenticated"]);
-                        // Don't require iss since Supabase doesn't always include it
-                        validation.required_spec_claims.remove("iss");
-                        validation.required_spec_claims.remove("sub");
+                        // Try to decode as a Google OAuth token first
+                        let mut google_validation = Validation::new(Algorithm::HS256);
+                        google_validation.validate_exp = true;
+                        google_validation.required_spec_claims.remove("aud");
                         
-                        match decode::<Claims>(
+                        match decode::<GoogleClaims>(
                             token,
                             &DecodingKey::from_secret(jwt_secret.as_bytes()),
-                            &validation
+                            &google_validation
                         ) {
                             Ok(token_data) => {
-                                // Only allow authenticated users
-                                if token_data.claims.role != "authenticated" {
-                                    return Box::pin(async move {
-                                        Err(actix_web::error::ErrorUnauthorized("Invalid role"))
-                                    });
-                                }
+                                // Successfully decoded as Google OAuth token
                                 req.extensions_mut().insert(token_data.claims);
                                 return Box::pin(self.service.call(req));
                             },
-                            Err(e) => {
-                                eprintln!("Token validation error: {:?}", e);
-                                return Box::pin(async move {
-                                    Err(actix_web::error::ErrorUnauthorized("Invalid token"))
-                                });
+                            Err(_) => {
+                                // Try to decode as a Supabase token
+                                let mut supabase_validation = Validation::new(Algorithm::HS256);
+                                supabase_validation.validate_exp = true;
+                                supabase_validation.set_audience(&["authenticated"]);
+                                // Don't require iss since Supabase doesn't always include it
+                                supabase_validation.required_spec_claims.remove("iss");
+                                supabase_validation.required_spec_claims.remove("sub");
+                                
+                                match decode::<SupabaseClaims>(
+                                    token,
+                                    &DecodingKey::from_secret(jwt_secret.as_bytes()),
+                                    &supabase_validation
+                                ) {
+                                    Ok(token_data) => {
+                                        // Only allow authenticated users
+                                        if token_data.claims.role != "authenticated" {
+                                            return Box::pin(async move {
+                                                Err(actix_web::error::ErrorUnauthorized("Invalid role"))
+                                            });
+                                        }
+                                        req.extensions_mut().insert(token_data.claims);
+                                        return Box::pin(self.service.call(req));
+                                    },
+                                    Err(e) => {
+                                        eprintln!("Token validation error: {:?}", e);
+                                        return Box::pin(async move {
+                                            Err(actix_web::error::ErrorUnauthorized("Invalid token"))
+                                        });
+                                    }
+                                }
                             }
                         }
                     }

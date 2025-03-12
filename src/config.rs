@@ -13,6 +13,14 @@ struct DaoConfig {
     address: String,
     database: String,
 }
+
+#[derive(Deserialize, Clone)]
+struct GoogleOAuthConfig {
+    client_id: String,
+    client_secret: String,
+    redirect_uri: String,
+}
+
 #[derive(Deserialize, Clone)]
 pub struct Config {
     app: AppConfig,
@@ -21,6 +29,7 @@ pub struct Config {
     jwt_secret: String,
     anon_key: String,
     auth_url: String,
+    google_oauth: GoogleOAuthConfig,
 }
 
 impl Config {
@@ -54,5 +63,17 @@ impl Config {
 
     pub fn get_auth_url(&self) -> &str {
         &self.auth_url
+    }
+    
+    pub fn get_google_client_id(&self) -> &str {
+        &self.google_oauth.client_id
+    }
+
+    pub fn get_google_client_secret(&self) -> &str {
+        &self.google_oauth.client_secret
+    }
+
+    pub fn get_google_redirect_uri(&self) -> &str {
+        &self.google_oauth.redirect_uri
     }
 }

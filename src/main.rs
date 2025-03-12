@@ -45,9 +45,7 @@ async fn main() -> std::io::Result<()> {
 
     HttpServer::new(move || {
         let cors = Cors::default()
-        .allowed_origin("https://kuis.canducation.com")
-        .allowed_origin("http://localhost:4200")
-        .allowed_origin("https://quiz-backend.afdaliable.dev")
+        .allow_any_origin()
         .allowed_methods(vec!["GET", "POST", "PUT", "DELETE", "OPTIONS"])
         .allowed_headers(vec![
         header::AUTHORIZATION,

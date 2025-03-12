@@ -11,6 +11,7 @@ pub mod dao;
 pub mod model;
 pub mod docs;
 pub mod middleware;
+pub mod utils;
 
 
 

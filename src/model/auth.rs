@@ -45,5 +45,8 @@ pub struct SupabaseUser {
     pub email: String,
     /// User's display name
     pub display_name: String,
+    /// User's profile picture URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
     // Add other fields as needed
 }
