@@ -8,6 +8,7 @@ mod list_paket_soal_lengkap;
 mod harga_paket;
 pub mod auth;
 mod users;
+pub mod session;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
@@ -20,3 +21,4 @@ pub type ListPaketSoalLengkap = list_paket_soal_lengkap::ListPaketSoalLengkap;
 pub type HargaPaket = harga_paket::HargaPaket;
 pub use auth::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 pub use users::User;
+pub use session::{Session, SessionResponse};

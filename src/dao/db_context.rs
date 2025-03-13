@@ -6,6 +6,7 @@ use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
 use crate::model::User;
 use crate::model::ListPaketSoalLengkap;
+use crate::model::Session;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -177,6 +178,7 @@ pub struct Database<'c> {
     pub users: Arc<Table<'c, User>>,
     pub kategori:Arc<Table<'c, KategoriSoal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
+    pub sessions: Arc<Table<'c, Session>>,
 }
 
 impl<'a> Database<'a> {
@@ -189,6 +191,7 @@ impl<'a> Database<'a> {
             users: Arc::from(Table::new(pool.clone())),
             kategori: Arc::from(Table::new(pool.clone())),
             paket_soal_response: Arc::from(JoinTable::new(pool.clone())),
+            sessions: Arc::from(Table::new(pool.clone())),
         }
     }
 }

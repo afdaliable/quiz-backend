@@ -13,6 +13,8 @@ use supabase_auth::models::AuthClient;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 use quiz_backend::docs::ApiDoc;
+use std::time::Duration;
+use tokio::time;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -42,6 +44,18 @@ async fn main() -> std::io::Result<()> {
 
     let app_url = config.get_app_url();
     let jwt_secret = config.get_jwt_secret().to_string();
+
+    // Start a background task to clean up expired sessions
+    let app_state_clone = app_state.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(3600)); // Run every hour
+        loop {
+            interval.tick().await;
+            if let Err(e) = app_state_clone.context.sessions.delete_expired_sessions().await {
+                eprintln!("Failed to clean up expired sessions: {:?}", e);
+            }
+        }
+    });
 
     HttpServer::new(move || {
         let cors = Cors::default()

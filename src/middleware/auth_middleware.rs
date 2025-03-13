@@ -1,9 +1,10 @@
-use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage};
+use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage, http::StatusCode};
 use actix_web::http::header;
 use futures::future::{LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 // Supabase JWT Claims
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,10 +24,13 @@ struct SupabaseClaims {
 // Google OAuth JWT Claims
 #[derive(Debug, Serialize, Deserialize)]
 struct GoogleClaims {
-    sub: String,
-    exp: usize,
-    email: String,
-    name: String,
+    sub: String,     // Subject (user ID)
+    exp: usize,      // Expiration time
+    iat: usize,      // Issued at
+    aud: String,     // Audience
+    iss: String,     // Issuer
+    email: String,   // User email
+    name: String,    // User name
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,7 +63,7 @@ const PUBLIC_ROUTES: [&str; 5] = [
     "/auth/v1/token",
     "/swagger-ui",
     "/api-docs/openapi.json",
-    "/auth/google/callback"
+    "/auth/google/callback",
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
@@ -119,7 +123,9 @@ where
                         // Try to decode as a Google OAuth token first
                         let mut google_validation = Validation::new(Algorithm::HS256);
                         google_validation.validate_exp = true;
-                        google_validation.required_spec_claims.remove("aud");
+                        // Don't validate aud and iss for Google OAuth tokens
+                        google_validation.validate_aud = false;
+                        // google_validation.validate_iss = false;
                         
                         match decode::<GoogleClaims>(
                             token,
@@ -131,7 +137,23 @@ where
                                 req.extensions_mut().insert(token_data.claims);
                                 return Box::pin(self.service.call(req));
                             },
-                            Err(_) => {
+                            Err(e) => {
+                                // Check if token is expired
+                                if let jsonwebtoken::errors::ErrorKind::ExpiredSignature = e.kind() {
+                                    return Box::pin(async move {
+                                        let error_response = json!({
+                                            "error": "session_expired",
+                                            "message": "Your session has expired. Please log in again.",
+                                            "status_code": 401
+                                        });
+                                        
+                                        Err(actix_web::error::InternalError::new(
+                                            error_response,
+                                            StatusCode::UNAUTHORIZED,
+                                        ).into())
+                                    });
+                                }
+                                
                                 // Try to decode as a Supabase token
                                 let mut supabase_validation = Validation::new(Algorithm::HS256);
                                 supabase_validation.validate_exp = true;
@@ -149,7 +171,16 @@ where
                                         // Only allow authenticated users
                                         if token_data.claims.role != "authenticated" {
                                             return Box::pin(async move {
-                                                Err(actix_web::error::ErrorUnauthorized("Invalid role"))
+                                                let error_response = json!({
+                                                    "error": "invalid_role",
+                                                    "message": "Invalid role. Please log in with appropriate permissions.",
+                                                    "status_code": 401
+                                                });
+                                                
+                                                Err(actix_web::error::InternalError::new(
+                                                    error_response,
+                                                    StatusCode::UNAUTHORIZED,
+                                                ).into())
                                             });
                                         }
                                         req.extensions_mut().insert(token_data.claims);
@@ -157,8 +188,34 @@ where
                                     },
                                     Err(e) => {
                                         eprintln!("Token validation error: {:?}", e);
+                                        
+                                        // Check if token is expired
+                                        if let jsonwebtoken::errors::ErrorKind::ExpiredSignature = e.kind() {
+                                            return Box::pin(async move {
+                                                let error_response = json!({
+                                                    "error": "session_expired",
+                                                    "message": "Your session has expired. Please log in again.",
+                                                    "status_code": 401
+                                                });
+                                                
+                                                Err(actix_web::error::InternalError::new(
+                                                    error_response,
+                                                    StatusCode::UNAUTHORIZED,
+                                                ).into())
+                                            });
+                                        }
+                                        
                                         return Box::pin(async move {
-                                            Err(actix_web::error::ErrorUnauthorized("Invalid token"))
+                                            let error_response = json!({
+                                                "error": "invalid_token",
+                                                "message": "Invalid token. Please log in again.",
+                                                "status_code": 401
+                                            });
+                                            
+                                            Err(actix_web::error::InternalError::new(
+                                                error_response,
+                                                StatusCode::UNAUTHORIZED,
+                                            ).into())
                                         });
                                     }
                                 }
@@ -167,11 +224,29 @@ where
                     }
                 }
                 Box::pin(async move {
-                    Err(actix_web::error::ErrorUnauthorized("Invalid authorization header"))
+                    let error_response = json!({
+                        "error": "invalid_auth_header",
+                        "message": "Invalid authorization header. Please log in again.",
+                        "status_code": 401
+                    });
+                    
+                    Err(actix_web::error::InternalError::new(
+                        error_response,
+                        StatusCode::UNAUTHORIZED,
+                    ).into())
                 })
             }
             None => Box::pin(async move {
-                Err(actix_web::error::ErrorUnauthorized("Missing authorization header"))
+                let error_response = json!({
+                    "error": "missing_auth_header",
+                    "message": "Missing authorization header. Please log in to access this resource.",
+                    "status_code": 401
+                });
+                
+                Err(actix_web::error::InternalError::new(
+                    error_response,
+                    StatusCode::UNAUTHORIZED,
+                ).into())
             })
         }
     }

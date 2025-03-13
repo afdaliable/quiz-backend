@@ -24,6 +24,8 @@ oauth2 = "4.4.2"
 url = "2.4.1"
 base64 = "0.21.5"
 thiserror = "1.0.50"
+tokio = { version = "1", features = ["full"] }
+
 
 [profile.dev.build-override]
 opt-level = 3
