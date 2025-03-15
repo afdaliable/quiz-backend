@@ -7,8 +7,14 @@ mod list_paket_soal;
 mod list_paket_soal_lengkap;
 mod harga_paket;
 pub mod auth;
-mod users;
+pub mod users;
 pub mod session;
+
+// Premium feature models
+pub mod premium_plan;
+pub mod user_subscription;
+pub mod premium_quiz_access;
+pub mod payment_transaction;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;

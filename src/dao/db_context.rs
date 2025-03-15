@@ -2,6 +2,10 @@ use super::Soal;
 use super::KategoriSoal;
 use super::PaketSoal;
 use super::PaketSoalItem;
+use super::PremiumPlan;
+use super::UserSubscription;
+use super::PremiumQuizAccess;
+use super::PaymentTransaction;
 use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
 use crate::model::User;
@@ -179,19 +183,27 @@ pub struct Database<'c> {
     pub kategori:Arc<Table<'c, KategoriSoal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
     pub sessions: Arc<Table<'c, Session>>,
+    pub premium_plans: Arc<Table<'c, PremiumPlan>>,
+    pub user_subscriptions: Arc<Table<'c, UserSubscription>>,
+    pub premium_quiz_access: Arc<Table<'c, PremiumQuizAccess>>,
+    pub payment_transactions: Arc<Table<'c, PaymentTransaction>>,
 }
 
 impl<'a> Database<'a> {
     pub async fn new(sql_url: &String) -> Database<'a> {
-        let connection = MySqlPool::connect(&sql_url).await.unwrap();
-        let pool = Arc::new(connection);
+        let pool = MySqlPool::connect(sql_url).await.unwrap();
+        let pool = Arc::new(pool);
 
         Database {
-            soal: Arc::from(Table::new(pool.clone())),
-            users: Arc::from(Table::new(pool.clone())),
-            kategori: Arc::from(Table::new(pool.clone())),
-            paket_soal_response: Arc::from(JoinTable::new(pool.clone())),
-            sessions: Arc::from(Table::new(pool.clone())),
+            soal: Arc::new(Table::new(pool.clone())),
+            users: Arc::new(Table::new(pool.clone())),
+            kategori: Arc::new(Table::new(pool.clone())),
+            paket_soal_response: Arc::new(JoinTable::new(pool.clone())),
+            sessions: Arc::new(Table::new(pool.clone())),
+            premium_plans: Arc::new(Table::new(pool.clone())),
+            user_subscriptions: Arc::new(Table::new(pool.clone())),
+            premium_quiz_access: Arc::new(Table::new(pool.clone())),
+            payment_transactions: Arc::new(Table::new(pool.clone())),
         }
     }
 }

@@ -3,6 +3,13 @@ use crate::model::{
     Soal, CreateSoalRequest, SignUpRequest, LoginRequest, 
     AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal, KategoriSoal,ListPaketSoalLengkap
 };
+// Premium models
+use crate::model::premium_plan::{PremiumPlan, PremiumPlanResponse, CreatePremiumPlanRequest, UpdatePremiumPlanRequest};
+use crate::model::user_subscription::{UserSubscription, UserSubscriptionResponse, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest};
+use crate::model::premium_quiz_access::{PremiumQuizAccess, PremiumQuizAccessResponse, CreatePremiumQuizAccessRequest, UpdatePremiumQuizAccessRequest, QuizAccessCheckResponse};
+use crate::model::payment_transaction::{PaymentTransaction, PaymentTransactionResponse, CreatePaymentRequest, PaymentStatus, MayarWebhookPayload};
+use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse};
+use crate::controller::payment_controller::PhoneNumberCheckResponse;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -22,12 +29,26 @@ use crate::model::{
         schemas(
             Soal, CreateSoalRequest, 
             SignUpRequest, LoginRequest, AuthResponse, SupabaseUser,
-            PaketSoalResponse, ListPaketSoal, KategoriSoal, ListPaketSoalLengkap
+            PaketSoalResponse, ListPaketSoal, KategoriSoal, ListPaketSoalLengkap,
+            // User phone number schemas
+            CheckPhoneNumberRequest, CheckPhoneNumberResponse, 
+            UpdatePhoneNumberRequest, UpdatePhoneNumberResponse,
+            PhoneNumberCheckResponse
+            // Premium schemas are commented out because they don't implement ToSchema
+            // PremiumPlan, PremiumPlanResponse, CreatePremiumPlanRequest, UpdatePremiumPlanRequest,
+            // UserSubscription, UserSubscriptionResponse, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest,
+            // PremiumQuizAccess, PremiumQuizAccessResponse, CreatePremiumQuizAccessRequest, UpdatePremiumQuizAccessRequest,
+            // QuizAccessCheckResponse,
+            // Payment schemas
+            // PaymentTransaction, PaymentTransactionResponse, CreatePaymentRequest, PaymentStatus, MayarWebhookPayload
         )
     ),
     tags(
         (name = "soal", description = "Soal management endpoints"),
-        (name = "auth", description = "Authentication endpoints using Supabase")
+        (name = "auth", description = "Authentication endpoints using Supabase"),
+        (name = "premium", description = "Premium subscription management endpoints"),
+        (name = "payment", description = "Payment processing endpoints"),
+        (name = "user", description = "User profile management endpoints")
     ),
     modifiers(&SecurityAddon)
 )]

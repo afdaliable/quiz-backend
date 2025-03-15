@@ -1,0 +1,136 @@
+---
+description: payment-premium-feature
+globs: 
+alwaysApply: false
+---
+Buatkan fitur untuk user premium dengan ada pilihan beberapa plan, misalnya Platinum Plan , Gold Plan, Silver Plan, and ultimate plan (lifetime, one time payment) buatkan kolom untuk mengisi detail fitur benefit setiap plannya nanti
+lalu bagaimana memapping quiz yang hanya dapat diakses oleh user premium, bisa kah dibuatkan di tabel khusus, 
+lalu integrasikan payment dengan mayar
+mayar api untuk membuat paymentRequest Payment
+POST
+Create Single Payment Request
+https://api.mayar.id/hl/v1/payment/create
+Create single payment request (Penagihan)
+
+Response example:
+
+Plain Text
+{
+    "statusCode": 200,
+    "messages": "success",
+    "data": {
+        "id": "abadbafc-46c9-46ab-a6b4-c23dcffb8ffd",
+        "transaction_id": "206d8f5e-0f9c-41aa-b424-377b463c7b67",
+        "transactionId": "206d8f5e-0f9c-41aa-b424-377b463c7b67",
+        "link": "https://cacana.mayar.link/pl/f61oc2tz6j"
+    }
+}
+for check status you can use endpoint: https://api.mayar.id/hl/v1/payment/(transaction_id)
+
+HEADERS
+Authorization
+Bearer Bearer Paste-Your-API-Key-Here
+
+Body
+raw (json)
+json
+{
+        "name": "andre",
+        "email": "alikusnadie@gmail.com",
+        "amount": 170000,
+        "mobile": "085797522261",
+        "redirectUrl": "https://kelaskami.com/nexst23",
+        "description": "kemana ini menjadi a",
+        "expiredAt": "2024-02-29T09:41:09.401Z"
+    }
+
+
+
+Lalu webhook dari mayar
+Webhook
+About Webhook
+Webhook provide a way for notifications to be delivered to an external web server whenever certain event occur in Mayar.
+
+Add a New Webhook
+You can configure Webhooks via the Mayar dashboard, here are the steps:
+
+For starting using Mayar Webhook, you need account at https://mayar.id. Please use https://web.mayar.club for testing
+
+Go to Integration -> Webhook page
+
+In the "URL Webhook" field, input the URL you got from a third-party integration platform (such as pipedream, zapier, or others) to trigger and send the webhook event
+
+Click save then test the URL to see the status of the Webhook URL.
+
+Request Method
+The format prepared by the engine is ​JSON​. with Method use POST and application/json for Content-type
+
+Event Type
+Message event webhooks can be triggered by several types of events:
+
+Event Name	Description
+payment.received	Event triggered after the customer makes a payment / has completed the payment
+payment.reminder	Event triggered if the customer doesn't complete the payment after 29 minutes
+shipper.status	Event triggered if tracking for physical product purchases changed
+membership.memberUnsubscribed	Event triggered if your membership client unsubscribe
+membership.memberExpired	Event triggered if your membership client expired
+Event payment.received payload
+
+payload that will be sent to the webhook server URL when there is a transaction
+{
+  "event": "payment.received",
+  "data": {
+    "id": "9356ec92-32ae-4d99-a1a7-51b11dff4d84",
+    "transactionId": "9356ec92-32ae-4d99-a1a7-51b11dff4d84",
+    "status": "SUCCESS",
+    "transactionStatus": "created",
+    "createdAt": 1693817623264,
+    "updatedAt": 1693817626638,
+    "merchantId": "348e083d-315a-4e5c-96b1-5a2a98c48413",
+    "merchantName": "Malo Gusto",
+    "merchantEmail": "aldodwier@gmail.com",
+    "customerName": "Student Test",
+    "customerEmail": "student@student.com",
+    "customerMobile": "0815",
+    "amount": 1029,
+    "isAdminFeeBorneByCustomer": true,
+    "isChannelFeeBorneByCustomer": true,
+    "productId": "e2b3f5d5-0c62-47ba-8a01-6c1c209e0f77",
+    "productName": "Kelas Pemrograman Web Dasar",
+    "productType": "course",
+    "pixelFbp": "fb.1.1693462870069.763035785",
+    "pixelFbc": null,
+  }
+}
+
+payment.reminder Payload
+
+payload that will be sent to the webhook server URL when there is a transaction that has not been paid by your customer for more than 29 minutes
+{
+  "event": "payment.reminder",
+  "data": {
+    "id": "b147e908-bba4-4337-ab03-bf9be504a539",
+    "status": "SUCCESS",
+    "transactionStatus": "created",
+    "createdAt": 1693550488964,
+    "updatedAt": 1693550703627,
+    "merchantId": "4dba4996-7d74-483e-99fe-b52c60368cb5",
+    "merchantEmail": "kugutsu.hiruko@gmail.com",
+    "customerName": "andre",
+    "customerEmail": "alikusnadie@gmail.com",
+    "customerMobile": "085",
+    "amount": 120000,
+    "isAdminFeeBorneByCustomer": false,
+    "isChannelFeeBorneByCustomer": false,
+    "productId": "f03694c1-2f6d-45c2-8be2-138f9fd34bbf",
+    "productName": "juak e book ranl",
+    "productType": "digital_product",
+    "pixelFbp": null,
+    "pixelFbc": null,
+    "paymentUrl": "https://korban-motivator.mayar.shop/plt/b147e908-bba4-4337-ab03-bf9be504a539?webhook=true"
+  }
+}
+
+saya ingin anda membuat semua hal yang berkaitan dengan backend,
+buatkan query yang dibutuhkan juga tambahkan di file @db.sql
+semua endpoint beserta payload & response yang dibutuhkan untuk digunakan frontend angular untuk fitur ini, lalu berikan guide untuk frontend menerapkan fitur ini

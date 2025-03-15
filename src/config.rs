@@ -22,6 +22,14 @@ struct GoogleOAuthConfig {
 }
 
 #[derive(Deserialize, Clone)]
+struct PaymentConfig {
+    mayar_api_key: String,
+    mayar_api_url: String,
+    mayar_webhook_url: String,
+    mayar_webhook_secret: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Config {
     app: AppConfig,
     dao: DaoConfig,
@@ -30,6 +38,7 @@ pub struct Config {
     anon_key: String,
     auth_url: String,
     google_oauth: GoogleOAuthConfig,
+    payment: PaymentConfig,
 }
 
 impl Config {
@@ -75,5 +84,21 @@ impl Config {
 
     pub fn get_google_redirect_uri(&self) -> &str {
         &self.google_oauth.redirect_uri
+    }
+
+    pub fn get_mayar_api_key(&self) -> &str {
+        &self.payment.mayar_api_key
+    }
+
+    pub fn get_mayar_api_url(&self) -> &str {
+        &self.payment.mayar_api_url
+    }
+
+    pub fn get_mayar_webhook_url(&self) -> &str {
+        &self.payment.mayar_webhook_url
+    }
+
+    pub fn get_mayar_webhook_secret(&self) -> &str {
+        &self.payment.mayar_webhook_secret
     }
 }
