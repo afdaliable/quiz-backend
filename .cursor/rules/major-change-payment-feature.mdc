@@ -1,0 +1,64 @@
+---
+description: change payment feature
+globs: 
+alwaysApply: false
+---
+
+
+after all the hard of make feature payment, i have found the solution but it lumayan change the structure right now but i hope you understand carefully,
+
+long short story, the system subscription payment will handle by mayar and after payment success mayar will give license code, and bring the license code with the callback url, and mayar provide the endpoint for verify the license code after payment,
+
+So the flow Is 
+When user klik Buy at Plan options, it will redirect to like this link 
+https://canducation.myr.id/m/special-plan?email=afdalsitp@gmail.com&productId=00ba4212-56ea-4b33-82c7-4eb0ee96d1c8&name=Afdhal%20Kurniawan&phone=8885217181956&token=ccc&user_id=789
+but  to be concern, the endpoint will generate that link above by provide endpoint like /payment/link-payment, why because all will be dynamic, 
+so the backend will mapping at database belongs to id premium plan that generate link by 
+{premium_plans.mayar_link_payment}?email={users.email}&product={premium_plans.mayar_product_id}&name={user.name("parsing to url because space")}&
+after success payment the url will go to thankyou page at mayar, and will click button back to apps
+the url will be 
+https://kuis.canducation.com/aktivasi-berlangganan/?licenseCode=0C6A09CFA61BBB98&email=afdalsitp@gmail.com&productId=aedda011-50a6-4839-9109-3e413ad5b887&name=Afdhal%20Kurniawan&phone=08312323823
+dari url redirect diatas saya minta frontend menyediakan halaman aktivasi berlangganan yang berisi form", sesuai query parameter, dan form sudah terisi dengan data dari redirect tersebut (jika bisa menggantikan productId dengan nama premium_plans ke backend, atau jika tidak bisa cukup hide saja form product id, tapi nanti tetap digunakan saat request ke backend) dan sediakan tombol aktivasi
+saat diklik tombol aktivasi akan request ke backend (backend sediakan endpoint)
+yang pertama backend memverifikasi licenseCode dengan endpoint dari mayar yaitu
+
+curl --location 'https://api.mayar.id/saas/v1/license/verify' \
+--header 'Authorization: Bearer Paste-Your-API-Key-Here' \
+--data '{
+    "licenseCode": "YOUR-LICENSE-CODE", -- dari frontend redirect url
+    "productId": "YOUR-PRODUCT-ID" -- dari frontend redirect url
+}'
+ example success response body
+ {
+    "statusCode": 200,
+    "isLicenseActive": true,
+    "licenseCode": {
+        "licenseCode": "LICENSECODE12345",
+        "status": "ACTIVE",
+        "expiredAt": "2025-12-12T19:46:24.000Z",
+        "transactionId": "994d4071-a81e-4558-a854-47530eea9b6d",
+        "productId": "84d1d247-a8b3-4c7d-96f0-cf276edb7c33",
+        "customerId": "6a38cf26-6bab-42c8-92be-72f3a9fd4c33",
+        "customerName": "John Doe",
+        "customerEmail": "johndoe@gmail.com",
+        "activationLimit": "Tidak terbatas",
+        "useCount": 10,
+        "createdAt": "2024-02-12T08:41:13.579Z",
+        "updatedAt": "2024-02-12T08:57:36.047Z",
+        "membershipTierId": "c96850f9-b379-4ed3-bcf2-6d88a87bd20c",
+        "membershipTierName": "Master Black Belt Membership"
+    }
+}
+failed response
+{
+    "statusCode": 400,
+    "message": "There's no license with code WRONGLICENSE123 and product id 84d1d247-a8b3-4c7d-96f0-cf276edb7c33 registered in user mayaruser@gmail.com."
+}
+after backend got success response from mayar, and backend will response to frontend to the success and valid of license code and i want the frontend redirect to home with valid session (like login but without with google, but only with license code and email that valid, backend should provide it, because if should login with google again it not make seamless and bad uiux)
+
+-make sure the tabel related about user subscription, is inserted after license code valid, and the transaction tabel not needed more because all will handle by mayar and we only verify the license code that provide from mayar
+-please be detailed, because of complexity the payment feature before that failed because transaction_id from mayar not found and we change the major flow of payment and structure payment, maybe you just comment the un needed payment code that we dont use with this feature and have made before related to payment, 
+- for frontend just remove the checking phone number before klik buy subscription because it dont needed at this feature of payment right now,
+- summary at @db.sql backend, that tabel that dont use, so we can delete it for make it not more confuse
+-just implement with comprehensive analyze first.  
+

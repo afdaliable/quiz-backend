@@ -58,12 +58,17 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 5] = [
+const PUBLIC_ROUTES: [&str; 10] = [
     "/signup",
     "/auth/v1/token",
     "/swagger-ui",
     "/api-docs/openapi.json",
     "/auth/google/callback",
+    "/user/check-phone",
+    "/user/update-phone",
+    "/api/user/update-phone",
+    "/payment/webhook",
+    "/license-public"
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
@@ -106,8 +111,16 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
+        // Log the path for debugging
+        println!("Request path: {}", req.path());
+        
         // Check if the route is public
-        if PUBLIC_ROUTES.iter().any(|route| req.path().starts_with(route)) {
+        let path = req.path();
+        let is_public = PUBLIC_ROUTES.iter().any(|route| {
+            path == *route || path.starts_with(route) && (path.len() == route.len() || path.chars().nth(route.len()) == Some('/'))
+        });
+
+        if is_public {
             return Box::pin(self.service.call(req));
         }
 

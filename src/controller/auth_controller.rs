@@ -313,7 +313,8 @@ async fn google_callback(
                                     let _ = app_state.context.users.update_user_profile(
                                         &user.id,
                                         &user.display_name,
-                                        Some(picture)
+                                        Some(picture),
+                                        None // No phone number from Google OAuth
                                     ).await;
                                 }
                             }

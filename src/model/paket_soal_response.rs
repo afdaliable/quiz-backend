@@ -10,6 +10,7 @@ pub struct PaketSoalResponse {
     pub nama_kategori: String,
     pub paket_soal_id: i32,
     pub nama_paket_soal: String,
+    pub is_premium: bool,
     pub kumpulan_soal: Vec<Soal>
 }
 
@@ -22,6 +23,7 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
             nama_kategori: row.get("nama_kategori"),
             paket_soal_id: row.get("paket_soal_id"),
             nama_paket_soal: row.get("nama_paket_soal"),
+            is_premium: row.get("is_premium"),
             kumpulan_soal: vec![Soal {
                 id: row.get("soal_id"),
                 soal: row.get("soal"),

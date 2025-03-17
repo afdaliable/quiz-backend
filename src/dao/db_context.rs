@@ -2,6 +2,11 @@ use super::Soal;
 use super::KategoriSoal;
 use super::PaketSoal;
 use super::PaketSoalItem;
+use super::PremiumPlan;
+use super::UserSubscription;
+use super::PremiumQuizAccess;
+use super::PaymentTransaction;
+use super::LicenseCode;
 use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
 use crate::model::User;
@@ -80,11 +85,12 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             r#"
             SELECT ps.id as id_nama_paket_soal, ps.nama_paket_soal,
                    ks.id as id_kategori_soal, ks.nama_kategori as kategori_soal,
-                   COUNT(psi.soal_id) as jumlah_soal
+                   COUNT(psi.soal_id) as jumlah_soal,
+                   ps.is_premium
             FROM paket_soal ps
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
-            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, ps.is_premium
             "#,
         )
         .fetch_all(&*self.pool)
@@ -99,12 +105,13 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
                    COUNT(psi.soal_id) as jumlah_soal,
                    COALESCE(hp.koin, 0) as koin,
                    COALESCE(hp.harga, 0) as harga,
-                   COALESCE(hp.is_free, FALSE) as is_free
+                   COALESCE(hp.is_free, FALSE) as is_free,
+                   ps.is_premium
             FROM paket_soal ps
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
             LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
-            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free, ps.is_premium
             "#,
         )
         .fetch_all(&*self.pool)
@@ -114,7 +121,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
     pub async fn get_paket_soal_response(&self, nama_kategori: &String, nama_paket_soal: &String) -> Result<PaketSoalResponse, sqlx::Error> {
         let mut results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
-            SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, 
+            SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution
             FROM kategori_soal ks 
             JOIN paket_soal ps ON ks.id = ps.kategori_id 
@@ -141,7 +148,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
         let results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
             SELECT ks.id as kategori_id, ks.nama_kategori, 
-                   ps.id as paket_soal_id, ps.nama_paket_soal,
+                   ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, 
                    s.opt4, s.opt5, s.correct_answer, s.solution
             FROM kategori_soal ks 
@@ -179,19 +186,29 @@ pub struct Database<'c> {
     pub kategori:Arc<Table<'c, KategoriSoal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
     pub sessions: Arc<Table<'c, Session>>,
+    pub premium_plans: Arc<Table<'c, PremiumPlan>>,
+    pub user_subscriptions: Arc<Table<'c, UserSubscription>>,
+    pub premium_quiz_access: Arc<Table<'c, PremiumQuizAccess>>,
+    pub payment_transactions: Arc<Table<'c, PaymentTransaction>>,
+    pub license_codes: Arc<Table<'c, LicenseCode>>,
 }
 
 impl<'a> Database<'a> {
     pub async fn new(sql_url: &String) -> Database<'a> {
-        let connection = MySqlPool::connect(&sql_url).await.unwrap();
-        let pool = Arc::new(connection);
+        let pool = MySqlPool::connect(sql_url).await.unwrap();
+        let pool = Arc::new(pool);
 
         Database {
-            soal: Arc::from(Table::new(pool.clone())),
-            users: Arc::from(Table::new(pool.clone())),
-            kategori: Arc::from(Table::new(pool.clone())),
-            paket_soal_response: Arc::from(JoinTable::new(pool.clone())),
-            sessions: Arc::from(Table::new(pool.clone())),
+            soal: Arc::new(Table::new(pool.clone())),
+            users: Arc::new(Table::new(pool.clone())),
+            kategori: Arc::new(Table::new(pool.clone())),
+            paket_soal_response: Arc::new(JoinTable::new(pool.clone())),
+            sessions: Arc::new(Table::new(pool.clone())),
+            premium_plans: Arc::new(Table::new(pool.clone())),
+            user_subscriptions: Arc::new(Table::new(pool.clone())),
+            premium_quiz_access: Arc::new(Table::new(pool.clone())),
+            payment_transactions: Arc::new(Table::new(pool.clone())),
+            license_codes: Arc::new(Table::new(pool.clone())),
         }
     }
 }

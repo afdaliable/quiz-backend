@@ -10,6 +10,7 @@ pub struct ListPaketSoal {
     pub id_kategori_soal: i32,
     pub kategori_soal: String,
     pub jumlah_soal: i64,
+    pub is_premium: bool,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for ListPaketSoal {
@@ -20,6 +21,7 @@ impl<'c> FromRow<'c, MySqlRow> for ListPaketSoal {
             id_kategori_soal: row.get("id_kategori_soal"),
             kategori_soal: row.get("kategori_soal"),
             jumlah_soal: row.get("jumlah_soal"),
+            is_premium: row.get("is_premium"),
         })
     }
 }

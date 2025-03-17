@@ -1,0 +1,4 @@
+dengan kondisi saat ini kita perlu memberikan flagging pada paket kuis, yaitu flagging apakah sebuah paket kuis tersebut gratis, atau hanya untuk premium user,
+buaatkan flagging tersebut sehingga frontend dapat menyesuaikan tampilan kuis premium dan yang gratis,
+saat user mengklik sebuah paket kuis premium, frontend mengecek apakah user ini user premium yang sudah berlangganan atau belum, jika belum munculkan notifikasi bahwa ini kuis khusus user premium dan di modal popup munculkan juga tombol berlangganan yang redirect ke halaman berlangganan, Jika merupakan user premium, user dapat melanjutkan kuis premium tersebut,
+berikan endpoint beserta kelengkapannya yang akan digunakan frontend

@@ -13,6 +13,7 @@ pub struct ListPaketSoalLengkap {
     pub koin: i32,
     pub harga: i32,
     pub is_free: bool,
+    pub is_premium: bool,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for ListPaketSoalLengkap {
@@ -26,6 +27,7 @@ impl<'c> FromRow<'c, MySqlRow> for ListPaketSoalLengkap {
             koin: row.get("koin"),
             harga: row.get("harga"),
             is_free: row.get("is_free"),
+            is_premium: row.get("is_premium"),
         })
     }
 }
