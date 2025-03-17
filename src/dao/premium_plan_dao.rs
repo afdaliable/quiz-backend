@@ -20,12 +20,21 @@ impl<'c> Table<'c, PremiumPlan> {
         .await
     }
 
+    pub async fn get_premium_plan_by_mayar_product_id(&self, product_id: &str) -> Result<Option<PremiumPlan>, Error> {
+        sqlx::query_as::<_, PremiumPlan>(
+            "SELECT * FROM dbquizapp.premium_plans WHERE mayar_product_id = ?"
+        )
+        .bind(product_id)
+        .fetch_optional(&*self.pool)
+        .await
+    }
+
     pub async fn create_premium_plan(&self, plan: &CreatePremiumPlanRequest) -> Result<i32, Error> {
         let features_json = serde_json::to_string(&plan.features).unwrap_or_default();
         
         let result = sqlx::query(
-            "INSERT INTO dbquizapp.premium_plans (name, description, price, duration_days, is_lifetime, features) 
-             VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO dbquizapp.premium_plans (name, description, price, duration_days, is_lifetime, features, mayar_product_id, mayar_link_payment) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&plan.name)
         .bind(&plan.description)
@@ -33,6 +42,8 @@ impl<'c> Table<'c, PremiumPlan> {
         .bind(plan.duration_days)
         .bind(plan.is_lifetime)
         .bind(features_json)
+        .bind(&plan.mayar_product_id)
+        .bind(&plan.mayar_link_payment)
         .execute(&*self.pool)
         .await?;
 
@@ -92,6 +103,24 @@ impl<'c> Table<'c, PremiumPlan> {
             let features_json = serde_json::to_string(features).unwrap_or_default();
             query_builder.push("features = ");
             query_builder.push_bind(features_json);
+            needs_comma = true;
+        }
+
+        if let Some(mayar_product_id) = &plan.mayar_product_id {
+            if needs_comma {
+                query_builder.push(", ");
+            }
+            query_builder.push("mayar_product_id = ");
+            query_builder.push_bind(mayar_product_id);
+            needs_comma = true;
+        }
+
+        if let Some(mayar_link_payment) = &plan.mayar_link_payment {
+            if needs_comma {
+                query_builder.push(", ");
+            }
+            query_builder.push("mayar_link_payment = ");
+            query_builder.push_bind(mayar_link_payment);
             needs_comma = true;
         }
 

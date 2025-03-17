@@ -14,12 +14,37 @@ impl<'c> Table<'c, UserSubscription> {
     }
 
     pub async fn get_user_subscription_by_id(&self, id: i32) -> Result<Option<UserSubscription>, Error> {
-        sqlx::query_as::<_, UserSubscription>(
+        let row = sqlx::query(
             "SELECT * FROM dbquizapp.user_subscriptions WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&*self.pool)
-        .await
+        .await?;
+        
+        match row {
+            Some(row) => {
+                // Convert the status string to the enum
+                let status_str: String = row.try_get("status")?;
+                let status = match status_str.to_lowercase().as_str() {
+                    "active" => SubscriptionStatus::Active,
+                    "expired" => SubscriptionStatus::Expired,
+                    "cancelled" => SubscriptionStatus::Cancelled,
+                    _ => SubscriptionStatus::Active, // Default to active if unknown
+                };
+                
+                Ok(Some(UserSubscription {
+                    id: row.try_get("id")?,
+                    user_id: row.try_get("user_id")?,
+                    plan_id: row.try_get("plan_id")?,
+                    start_date: row.try_get("start_date")?,
+                    end_date: row.try_get("end_date")?,
+                    status,
+                    created_at: row.try_get("created_at")?,
+                    updated_at: row.try_get("updated_at")?,
+                }))
+            },
+            None => Ok(None),
+        }
     }
 
     pub async fn get_active_subscription(&self, user_id: &str) -> Result<Option<UserSubscriptionWithPlan>, Error> {
@@ -71,14 +96,15 @@ impl<'c> Table<'c, UserSubscription> {
 
     pub async fn create_subscription(&self, subscription: &CreateUserSubscriptionRequest) -> Result<i32, Error> {
         // Get the plan details to determine end_date
-        let plan = sqlx::query_as::<_, (i32, i32)>(
+        let plan_result = sqlx::query_as::<_, (i32, i32)>(
             "SELECT duration_days, is_lifetime FROM dbquizapp.premium_plans WHERE id = ?"
         )
         .bind(subscription.plan_id)
-        .fetch_one(&*self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
         
-        let (duration_days, is_lifetime) = plan;
+        // Default values if plan not found (30 days, not lifetime)
+        let (duration_days, is_lifetime) = plan_result.unwrap_or((30, 0));
 
         let end_date = if is_lifetime != 0 {
             None

@@ -513,8 +513,12 @@ async fn payment_webhook(
             });
         },
     };
-
     // Determine payment status
+    let status_str = payload_json.get("data")
+        .and_then(|d| d.get("status"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("PENDING");
+        
     let status = match status_str.to_uppercase().as_str() {
         "SUCCESS" => PaymentStatus::Completed,
         "EXPIRED" => PaymentStatus::Expired,

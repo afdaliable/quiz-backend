@@ -6,6 +6,7 @@ use crate::model::premium_plan::PremiumPlan;
 use crate::model::user_subscription::UserSubscription;
 use crate::model::premium_quiz_access::PremiumQuizAccess;
 use crate::model::payment_transaction::PaymentTransaction;
+use crate::model::license_code::LicenseCode;
 
 pub mod db_context;
 //use super::model::User;
@@ -19,6 +20,8 @@ mod premium_plan_dao;
 mod user_subscription_dao;
 mod premium_quiz_access_dao;
 mod payment_transaction_dao;
+mod license_code_dao;
+pub mod license_dao;
 // mod user_to_group_dao;
 
 pub use db_context::Database;

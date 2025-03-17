@@ -27,6 +27,7 @@ struct PaymentConfig {
     mayar_api_url: String,
     mayar_webhook_url: String,
     mayar_webhook_secret: String,
+    mayar_saas_api_url: String,
 }
 
 #[derive(Deserialize, Clone)]
@@ -100,5 +101,9 @@ impl Config {
 
     pub fn get_mayar_webhook_secret(&self) -> &str {
         &self.payment.mayar_webhook_secret
+    }
+
+    pub fn get_mayar_saas_api_url(&self) -> &str {
+        &self.payment.mayar_saas_api_url
     }
 }

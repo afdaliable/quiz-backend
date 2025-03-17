@@ -58,7 +58,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 9] = [
+const PUBLIC_ROUTES: [&str; 10] = [
     "/signup",
     "/auth/v1/token",
     "/swagger-ui",
@@ -67,8 +67,8 @@ const PUBLIC_ROUTES: [&str; 9] = [
     "/user/check-phone",
     "/user/update-phone",
     "/api/user/update-phone",
-    "/payment/webhook"
-
+    "/payment/webhook",
+    "/license-public"
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware

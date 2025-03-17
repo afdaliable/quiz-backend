@@ -15,6 +15,7 @@ pub mod premium_plan;
 pub mod user_subscription;
 pub mod premium_quiz_access;
 pub mod payment_transaction;
+pub mod license_code;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;

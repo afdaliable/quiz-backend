@@ -189,4 +189,26 @@ mod chrono_string_or_i64 {
 
         deserializer.deserialize_any(StringOrI64Visitor)
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct License {
+    pub id: i32,
+    pub license_code: String,
+    pub user_id: String,
+    pub plan_id: i32,
+    pub status: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub expired_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub is_lifetime: bool,
+    pub product_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LicenseVerificationRequest {
+    pub license_code: String,
+    pub product_id: String,
+    pub email: String,
+    pub name: String,
+    pub phone: String,
 } 

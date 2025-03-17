@@ -11,6 +11,8 @@ pub struct PremiumPlan {
     pub duration_days: i32,
     pub is_lifetime: bool,
     pub features: String, // JSON array of features
+    pub mayar_product_id: Option<String>, // New field for Mayar product ID
+    pub mayar_link_payment: Option<String>, // New field for Mayar payment link
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -24,6 +26,8 @@ pub struct PremiumPlanResponse {
     pub duration_days: i32,
     pub is_lifetime: bool,
     pub features: Vec<String>,
+    pub mayar_product_id: Option<String>, // New field for Mayar product ID
+    pub mayar_link_payment: Option<String>, // New field for Mayar payment link
 }
 
 impl From<PremiumPlan> for PremiumPlanResponse {
@@ -38,6 +42,8 @@ impl From<PremiumPlan> for PremiumPlanResponse {
             duration_days: plan.duration_days,
             is_lifetime: plan.is_lifetime,
             features,
+            mayar_product_id: plan.mayar_product_id,
+            mayar_link_payment: plan.mayar_link_payment,
         }
     }
 }
@@ -50,6 +56,8 @@ pub struct CreatePremiumPlanRequest {
     pub duration_days: i32,
     pub is_lifetime: bool,
     pub features: Vec<String>,
+    pub mayar_product_id: Option<String>, // New field for Mayar product ID
+    pub mayar_link_payment: Option<String>, // New field for Mayar payment link
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,4 +68,6 @@ pub struct UpdatePremiumPlanRequest {
     pub duration_days: Option<i32>,
     pub is_lifetime: Option<bool>,
     pub features: Option<Vec<String>>,
+    pub mayar_product_id: Option<String>, // New field for Mayar product ID
+    pub mayar_link_payment: Option<String>, // New field for Mayar payment link
 } 
