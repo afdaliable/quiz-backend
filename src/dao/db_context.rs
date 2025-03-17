@@ -85,11 +85,12 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             r#"
             SELECT ps.id as id_nama_paket_soal, ps.nama_paket_soal,
                    ks.id as id_kategori_soal, ks.nama_kategori as kategori_soal,
-                   COUNT(psi.soal_id) as jumlah_soal
+                   COUNT(psi.soal_id) as jumlah_soal,
+                   ps.is_premium
             FROM paket_soal ps
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
-            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, ps.is_premium
             "#,
         )
         .fetch_all(&*self.pool)
@@ -104,12 +105,13 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
                    COUNT(psi.soal_id) as jumlah_soal,
                    COALESCE(hp.koin, 0) as koin,
                    COALESCE(hp.harga, 0) as harga,
-                   COALESCE(hp.is_free, FALSE) as is_free
+                   COALESCE(hp.is_free, FALSE) as is_free,
+                   ps.is_premium
             FROM paket_soal ps
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
             LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
-            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free
+            GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free, ps.is_premium
             "#,
         )
         .fetch_all(&*self.pool)
@@ -119,7 +121,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
     pub async fn get_paket_soal_response(&self, nama_kategori: &String, nama_paket_soal: &String) -> Result<PaketSoalResponse, sqlx::Error> {
         let mut results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
-            SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, 
+            SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution
             FROM kategori_soal ks 
             JOIN paket_soal ps ON ks.id = ps.kategori_id 
@@ -146,7 +148,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
         let results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
             SELECT ks.id as kategori_id, ks.nama_kategori, 
-                   ps.id as paket_soal_id, ps.nama_paket_soal,
+                   ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, 
                    s.opt4, s.opt5, s.correct_answer, s.solution
             FROM kategori_soal ks 

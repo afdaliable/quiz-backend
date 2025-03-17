@@ -1,5 +1,5 @@
 use crate::dao::Table;
-use crate::model::user_subscription::{UserSubscription, UserSubscriptionWithPlan, SubscriptionStatus, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest};
+use crate::model::user_subscription::{UserSubscription, UserSubscriptionWithPlan, SubscriptionStatus, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest, UserSubscriptionResponse};
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{Error, Row};
 
@@ -202,5 +202,64 @@ impl<'c> Table<'c, UserSubscription> {
         .await?;
 
         Ok(count > 0)
+    }
+
+    pub async fn get_user_subscriptions_by_user_id(&self, user_id: &str) -> Result<Vec<UserSubscriptionResponse>, Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT 
+                us.id,
+                us.user_id,
+                us.plan_id,
+                pp.name as plan_name,
+                us.status,
+                us.start_date,
+                us.end_date,
+                pp.is_lifetime
+            FROM 
+                dbquizapp.user_subscriptions us
+            JOIN 
+                dbquizapp.premium_plans pp ON us.plan_id = pp.id
+            WHERE 
+                us.user_id = ?
+            ORDER BY 
+                us.created_at DESC
+            "#
+        )
+        .bind(user_id)
+        .fetch_all(&*self.pool)
+        .await?;
+        
+        let mut result = Vec::with_capacity(rows.len());
+        for row in rows {
+            let is_lifetime: i32 = row.try_get("is_lifetime")?;
+            let end_date: Option<DateTime<Utc>> = row.try_get("end_date")?;
+            
+            // Calculate days remaining
+            let days_remaining = if let Some(end_date) = end_date {
+                let now = Utc::now();
+                if end_date > now {
+                    Some((end_date - now).num_days())
+                } else {
+                    Some(0)
+                }
+            } else {
+                None
+            };
+            
+            result.push(UserSubscriptionResponse {
+                id: row.try_get("id")?,
+                user_id: row.try_get("user_id")?,
+                plan_id: row.try_get("plan_id")?,
+                plan_name: row.try_get("plan_name")?,
+                status: row.try_get("status")?,
+                start_date: row.try_get("start_date")?,
+                end_date,
+                is_lifetime: is_lifetime != 0,
+                days_remaining,
+            });
+        }
+        
+        Ok(result)
     }
 } 

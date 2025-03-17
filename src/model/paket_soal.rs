@@ -7,6 +7,7 @@ pub struct PaketSoal {
     pub id: i32,
     pub nama_paket_soal: String,
     pub kategori_id: i32,
+    pub is_premium: bool,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for PaketSoal {
@@ -15,6 +16,7 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoal {
             id: row.get("id"),
             nama_paket_soal: row.get("nama_paket_soal"),
             kategori_id: row.get("kategori_id"),
+            is_premium: row.get("is_premium"),
         })
     }
 }

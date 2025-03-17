@@ -51,6 +51,12 @@ pub fn get_user_id_from_token(req: &HttpRequest) -> Option<String> {
     None
 }
 
+/// Extract user ID from the request
+/// This is a wrapper around get_user_id_from_token for better naming
+pub fn extract_user_id(req: &HttpRequest) -> Option<String> {
+    get_user_id_from_token(req)
+}
+
 /// Generate a JWT token for a user
 pub fn generate_token(user_id: &str, email: &str, name: &str, jwt_secret: &str, app_url: &str) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();

@@ -151,7 +151,9 @@ impl<'c> Table<'c, PremiumQuizAccess> {
         // First check if the quiz requires premium access
         let premium_access = self.get_premium_quiz_access_by_paket_soal_id(paket_soal_id).await?;
         
-        // If no premium access required, everyone can access
+        // If no premium access entry found, we'll check if the user has any active subscription
+        // This is handled in the controller, so we'll just return true here
+        // The controller will check if the quiz is premium and if the user has an active subscription
         if premium_access.is_none() {
             return Ok(true);
         }
