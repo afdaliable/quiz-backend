@@ -138,7 +138,8 @@ where
                         google_validation.validate_exp = true;
                         // Don't validate aud and iss for Google OAuth tokens
                         google_validation.validate_aud = false;
-                        // google_validation.validate_iss = false;
+                        // Don't validate issuer for Google OAuth tokens
+                        google_validation.required_spec_claims.remove("iss");
                         
                         match decode::<GoogleClaims>(
                             token,
@@ -147,8 +148,22 @@ where
                         ) {
                             Ok(token_data) => {
                                 // Successfully decoded as Google OAuth token
+                                // Extract user ID before moving the claims
+                                let user_id = token_data.claims.sub.clone();
+                                
+                                // Insert claims into request extensions
                                 req.extensions_mut().insert(token_data.claims);
-                                return Box::pin(self.service.call(req));
+                                
+                                // Add user_id header for backward compatibility
+                                let mut req_mut = req;
+                                if let Ok(user_id_value) = header::HeaderValue::from_str(&user_id) {
+                                    req_mut.headers_mut().insert(
+                                        header::HeaderName::from_static("user_id"),
+                                        user_id_value
+                                    );
+                                }
+                                
+                                return Box::pin(self.service.call(req_mut));
                             },
                             Err(e) => {
                                 // Check if token is expired
@@ -196,8 +211,23 @@ where
                                                 ).into())
                                             });
                                         }
+                                        
+                                        // Extract user ID before moving the claims
+                                        let user_id = token_data.claims.sub.clone();
+                                        
+                                        // Insert claims into request extensions
                                         req.extensions_mut().insert(token_data.claims);
-                                        return Box::pin(self.service.call(req));
+                                        
+                                        // Add user_id header for backward compatibility
+                                        let mut req_mut = req;
+                                        if let Ok(user_id_value) = header::HeaderValue::from_str(&user_id) {
+                                            req_mut.headers_mut().insert(
+                                                header::HeaderName::from_static("user_id"),
+                                                user_id_value
+                                            );
+                                        }
+                                        
+                                        return Box::pin(self.service.call(req_mut));
                                     },
                                     Err(e) => {
                                         eprintln!("Token validation error: {:?}", e);
