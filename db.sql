@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS dbquizapp.harga_paket (
   harga decimal(10, 2) NOT NULL DEFAULT 0.00,
   is_free tinyint(1) NOT NULL DEFAULT 0,
   created_at timestamp DEFAULT CURRENT_TIMESTAMP,
-  updated_at timestamp DEFAULT CURRENT_TIMESTAMP
+  updated_at timestamp DEFAULT CURRENT_TIMESTAMP 
 );
 
 CREATE UNIQUE INDEX dbquizapp_harga_paket_id_uindex ON dbquizapp.harga_paket (id);
