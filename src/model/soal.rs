@@ -25,6 +25,12 @@ pub struct Soal {
     pub correct_answer: String,
     /// Solution explanation
     pub solution: String,
+    /// Source file
+    pub sumberfile: Option<String>,
+    /// Module
+    pub modul: Option<String>,
+    /// Subject/Lesson
+    pub pelajaran: Option<String>,
 }
 
 /// Request payload for creating a new soal
@@ -46,6 +52,12 @@ pub struct CreateSoalRequest {
     pub correct_answer: String,
     /// Solution explanation
     pub solution: String,
+    /// Source file
+    pub sumberfile: Option<String>,
+    /// Module
+    pub modul: Option<String>,
+    /// Subject/Lesson
+    pub pelajaran: Option<String>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
@@ -60,6 +72,9 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             opt5: row.get(6),
             correct_answer: row.get(7),
             solution: row.get(8),
+            sumberfile: row.get(9),
+            modul: row.get(10),
+            pelajaran: row.get(11),
         })
     }
 }

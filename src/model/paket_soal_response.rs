@@ -34,6 +34,9 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
                 opt5: row.get("opt5"),
                 correct_answer: row.get("correct_answer"),
                 solution: row.get("solution"),
+                sumberfile: row.get("sumberfile"),
+                modul: row.get("modul"),
+                pelajaran: row.get("pelajaran"),
             }],
         })
     }

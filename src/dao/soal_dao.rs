@@ -51,34 +51,36 @@ impl<'c> Table<'c, Soal> {
         .await
     }
 
-        pub async fn create_soal(&self, request: &CreateSoalRequest) -> Result<Soal, Error> {
-            let result = sqlx::query(
-                r#"
-                INSERT INTO soal (soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                "#)
-                .bind(&request.soal)
-                .bind(&request.opt1)
-                .bind(&request.opt2)
-                .bind(&request.opt3)
-                .bind(&request.opt4)
-                .bind(&request.opt5)
-                .bind(&request.correct_answer)
-                .bind(&request.solution)
-                .execute(&*self.pool)
-                .await?;
+    pub async fn create_soal(&self, request: &CreateSoalRequest) -> Result<Soal, Error> {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO dbquizapp.soal (soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "#)
+            .bind(&request.soal)
+            .bind(&request.opt1)
+            .bind(&request.opt2)
+            .bind(&request.opt3)
+            .bind(&request.opt4)
+            .bind(&request.opt5)
+            .bind(&request.correct_answer)
+            .bind(&request.solution)
+            .bind(&request.sumberfile)
+            .bind(&request.modul)
+            .bind(&request.pelajaran)
+            .execute(&*self.pool)
+            .await?;
 
-            let id = result.last_insert_id();
+        let id = result.last_insert_id();
 
-            // Fetch the inserted row
-            sqlx::query_as::<_, Soal>(
-                "SELECT * FROM soal WHERE id = ?"
-            )
-            .bind(id)
-            .fetch_one(&*self.pool)
-            .await
-        }
-    
+        // Fetch the inserted row
+        sqlx::query_as::<_, Soal>(
+            "SELECT * FROM soal WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_one(&*self.pool)
+        .await
+    }
 
     // pub async fn add_user(&self, user: &User) -> Result<u64, sqlx::Error> {
     //     sqlx::query(
