@@ -30,7 +30,9 @@ pub struct Soal {
     /// Module
     pub modul: Option<String>,
     /// Subject/Lesson
-    pub pelajaran: Option<String>,
+    pub pelajaran: Option<String>,  
+    /// Tag
+    pub tag: Option<String>,
 }
 
 /// Request payload for creating a new soal
@@ -58,6 +60,8 @@ pub struct CreateSoalRequest {
     pub modul: Option<String>,
     /// Subject/Lesson
     pub pelajaran: Option<String>,
+    /// Tag
+    pub tag: Option<String>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
@@ -75,6 +79,7 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             sumberfile: row.get(9),
             modul: row.get(10),
             pelajaran: row.get(11),
+            tag: row.get(12),
         })
     }
 }

@@ -54,8 +54,8 @@ impl<'c> Table<'c, Soal> {
     pub async fn create_soal(&self, request: &CreateSoalRequest) -> Result<Soal, Error> {
         let result = sqlx::query(
             r#"
-            INSERT INTO dbquizapp.soal (soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dbquizapp.soal (soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#)
             .bind(&request.soal)
             .bind(&request.opt1)
@@ -68,6 +68,7 @@ impl<'c> Table<'c, Soal> {
             .bind(&request.sumberfile)
             .bind(&request.modul)
             .bind(&request.pelajaran)
+            .bind(&request.tag)
             .execute(&*self.pool)
             .await?;
 
