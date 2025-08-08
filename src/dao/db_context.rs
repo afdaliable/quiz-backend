@@ -151,7 +151,8 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             SELECT ks.id as kategori_id, ks.nama_kategori, 
                    ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, 
-                   s.opt4, s.opt5, s.correct_answer, s.solution
+                   s.opt4, s.opt5, s.correct_answer, s.solution,
+                   s.sumberfile, s.modul, s.pelajaran, s.tag
             FROM kategori_soal ks 
             JOIN paket_soal ps ON ks.id = ps.kategori_id 
             JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 

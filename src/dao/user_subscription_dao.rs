@@ -1,5 +1,5 @@
 use crate::dao::Table;
-use crate::model::user_subscription::{UserSubscription, UserSubscriptionWithPlan, SubscriptionStatus, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest, UserSubscriptionResponse};
+use crate::model::user_subscription::{UserSubscription, UserSubscriptionWithPlan, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest, UserSubscriptionResponse};
 use chrono::{DateTime, Duration, Utc};
 use sqlx::{Error, Row};
 
@@ -14,37 +14,12 @@ impl<'c> Table<'c, UserSubscription> {
     }
 
     pub async fn get_user_subscription_by_id(&self, id: i32) -> Result<Option<UserSubscription>, Error> {
-        let row = sqlx::query(
+        sqlx::query_as::<_, UserSubscription>(
             "SELECT * FROM dbquizapp.user_subscriptions WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(&*self.pool)
-        .await?;
-        
-        match row {
-            Some(row) => {
-                // Convert the status string to the enum
-                let status_str: String = row.try_get("status")?;
-                let status = match status_str.to_lowercase().as_str() {
-                    "active" => SubscriptionStatus::Active,
-                    "expired" => SubscriptionStatus::Expired,
-                    "cancelled" => SubscriptionStatus::Cancelled,
-                    _ => SubscriptionStatus::Active, // Default to active if unknown
-                };
-                
-                Ok(Some(UserSubscription {
-                    id: row.try_get("id")?,
-                    user_id: row.try_get("user_id")?,
-                    plan_id: row.try_get("plan_id")?,
-                    start_date: row.try_get("start_date")?,
-                    end_date: row.try_get("end_date")?,
-                    status,
-                    created_at: row.try_get("created_at")?,
-                    updated_at: row.try_get("updated_at")?,
-                }))
-            },
-            None => Ok(None),
-        }
+        .await
     }
 
     pub async fn get_active_subscription(&self, user_id: &str) -> Result<Option<UserSubscriptionWithPlan>, Error> {

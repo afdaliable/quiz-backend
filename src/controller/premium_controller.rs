@@ -158,15 +158,15 @@ async fn get_user_subscriptions(
 ) -> impl Responder {
     log_request("/premium/subscriptions", &data.connections);
 
-    // Get user_id from token
-    let user_id = match req.headers().get("user_id") {
-        Some(id) => id.to_str().unwrap_or_default(),
+    // Extract user ID from token
+    let user_id = match extract_user_id(&req) {
+        Some(id) => id,
         None => return HttpResponse::Unauthorized().json(ErrorResponse {
             error: "Unauthorized".to_string(),
         }),
     };
 
-    match data.context.user_subscriptions.get_user_subscriptions(user_id).await {
+    match data.context.user_subscriptions.get_user_subscriptions(&user_id).await {
         Ok(subscriptions) => {
             // Convert to response objects with plan names
             let mut response_subscriptions = Vec::new();
@@ -191,7 +191,7 @@ async fn get_user_subscriptions(
                         plan_name: plan.name,
                         start_date: subscription.start_date,
                         end_date: subscription.end_date,
-                        status: format!("{:?}", subscription.status),
+                        status: subscription.status.clone(),
                         is_lifetime: plan.is_lifetime,
                         days_remaining,
                     });
@@ -212,15 +212,15 @@ async fn get_active_subscription(
 ) -> impl Responder {
     log_request("/premium/subscriptions/active", &data.connections);
 
-    // Get user_id from token
-    let user_id = match req.headers().get("user_id") {
-        Some(id) => id.to_str().unwrap_or_default(),
+    // Extract user ID from token
+    let user_id = match extract_user_id(&req) {
+        Some(id) => id,
         None => return HttpResponse::Unauthorized().json(ErrorResponse {
             error: "Unauthorized".to_string(),
         }),
     };
 
-    match data.context.user_subscriptions.get_active_subscription(user_id).await {
+    match data.context.user_subscriptions.get_active_subscription(&user_id).await {
         Ok(Some(subscription)) => {
             let days_remaining = if let Some(end_date) = subscription.end_date {
                 let now = Utc::now();
@@ -240,7 +240,7 @@ async fn get_active_subscription(
                 plan_name: subscription.plan_name,
                 start_date: subscription.start_date,
                 end_date: subscription.end_date,
-                status: format!("{:?}", subscription.status),
+                status: subscription.status.clone(),
                 is_lifetime: subscription.is_lifetime,
                 days_remaining,
             };
@@ -264,9 +264,9 @@ async fn get_subscription_by_id(
     let id = path.into_inner();
     log_request("/premium/subscriptions/{id}", &data.connections);
 
-    // Get user_id from token
-    let user_id = match req.headers().get("user_id") {
-        Some(id) => id.to_str().unwrap_or_default(),
+    // Extract user ID from token
+    let user_id = match extract_user_id(&req) {
+        Some(id) => id,
         None => return HttpResponse::Unauthorized().json(ErrorResponse {
             error: "Unauthorized".to_string(),
         }),
@@ -300,7 +300,7 @@ async fn get_subscription_by_id(
                     plan_name: plan.name,
                     start_date: subscription.start_date,
                     end_date: subscription.end_date,
-                    status: format!("{:?}", subscription.status),
+                    status: subscription.status.clone(),
                     is_lifetime: plan.is_lifetime,
                     days_remaining,
                 };
@@ -375,9 +375,9 @@ async fn cancel_subscription(
     let id = path.into_inner();
     log_request("/premium/subscriptions/{id}/cancel", &data.connections);
 
-    // Get user_id from token
-    let user_id = match req.headers().get("user_id") {
-        Some(id) => id.to_str().unwrap_or_default(),
+    // Extract user ID from token
+    let user_id = match extract_user_id(&req) {
+        Some(id) => id,
         None => return HttpResponse::Unauthorized().json(ErrorResponse {
             error: "Unauthorized".to_string(),
         }),
@@ -539,9 +539,9 @@ async fn check_quiz_access(
     let paket_soal_id = path.into_inner();
     log_request("/premium/quiz-access/check/{paket_soal_id}", &data.connections);
 
-    // Get user_id from token
-    let user_id = match req.headers().get("user_id") {
-        Some(id) => id.to_str().unwrap_or_default(),
+    // Extract user ID from token
+    let user_id = match extract_user_id(&req) {
+        Some(id) => id,
         None => return HttpResponse::Unauthorized().json(ErrorResponse {
             error: "Unauthorized".to_string(),
         }),
@@ -551,7 +551,7 @@ async fn check_quiz_access(
     match data.context.premium_quiz_access.get_premium_quiz_access_by_paket_soal_id(paket_soal_id).await {
         Ok(Some(access)) => {
             // Quiz requires premium access, check if user has access
-            match data.context.premium_quiz_access.check_user_access_to_quiz(user_id, paket_soal_id).await {
+            match data.context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_id).await {
                 Ok(has_access) => {
                     let response = QuizAccessCheckResponse {
                         has_access,

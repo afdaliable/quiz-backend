@@ -9,17 +9,9 @@ pub struct UserSubscription {
     pub plan_id: i32,
     pub start_date: DateTime<Utc>,
     pub end_date: Option<DateTime<Utc>>,
-    pub status: SubscriptionStatus,
+    pub status: String,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "ENUM", rename_all = "lowercase")]
-pub enum SubscriptionStatus {
-    Active,
-    Expired,
-    Cancelled,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,7 +22,7 @@ pub struct UserSubscriptionWithPlan {
     pub plan_name: String,
     pub start_date: DateTime<Utc>,
     pub end_date: Option<DateTime<Utc>>,
-    pub status: SubscriptionStatus,
+    pub status: String,
     pub is_lifetime: bool,
 }
 
@@ -55,6 +47,6 @@ pub struct CreateUserSubscriptionRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateUserSubscriptionRequest {
-    pub status: Option<SubscriptionStatus>,
+    pub status: Option<String>,
     pub end_date: Option<DateTime<Utc>>,
 } 
