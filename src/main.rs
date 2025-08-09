@@ -5,6 +5,7 @@ use actix_cors::Cors;
 use quiz_backend::config::Config;
 use quiz_backend::dao::Database;
 use quiz_backend::{controller, AppState};
+use quiz_backend::service::redis_service::RedisPool;
 use supabase_auth::models::SignUpWithPasswordOptions;
 use std::sync::{Arc, Mutex};
 use http::header;
@@ -34,12 +35,25 @@ async fn main() -> std::io::Result<()> {
         config.get_jwt_secret(),
     );
 
+    let redis_pool = match RedisPool::new(&config.get_redis_url()).await {
+        Ok(pool) => {
+            println!("Connected to Redis: {}:{}", config.get_redis_host(), config.get_redis_port());
+            Some(Arc::new(pool))
+        },
+        Err(e) => {
+            eprintln!("Failed to connect to Redis: {:?}", e);
+            eprintln!("Continuing without Redis cache...");
+            None
+        }
+    };
+
     let app_state = web::Data::new(AppState {
         connections: Mutex::new(0),
         context: Arc::new(db_context),
         config: config.clone(),
         auth_client,
         sign_up_with_password_options: SignUpWithPasswordOptions::default(),
+        redis_pool,
     });
 
     let app_url = config.get_app_url();

@@ -5,6 +5,7 @@ use super::AppState;
 use actix_web::{get, post, put, web, HttpResponse, Responder, HttpRequest};
 use crate::model::CreateSoalRequest;
 use crate::utils::auth::extract_user_id;
+use crate::service::redis_service::RedisService;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
@@ -79,12 +80,46 @@ async fn get_paket_soal_response(
     let (nama_kategori, nama_paket_soal) = path.into_inner();
     log_request("GET: /paket-soal-response", &app_state.connections);
     
-    // Get the paket soal response
-    let paket_soal_response = match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
-        Ok(response) => response,
-        Err(e) => {
-            println!("Error: {:?}", e);
-            return HttpResponse::NotFound().finish();
+    // Create cache key
+    let cache_key = format!("{}:{}", nama_kategori, nama_paket_soal);
+    let cache_key_hash = format!("{:x}", md5::compute(&cache_key));
+    
+    // Try to get from Redis cache first
+    let paket_soal_response = if let Some(redis_pool) = &app_state.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        
+        // Try to get from cache
+        match RedisService::get_cached_quiz::<crate::model::PaketSoalResponse>(&mut con, cache_key_hash.parse().unwrap_or(0)).await {
+            Ok(Some(cached_response)) => {
+                println!("Cache hit for paket soal: {}/{}", nama_kategori, nama_paket_soal);
+                cached_response
+            },
+            _ => {
+                println!("Cache miss for paket soal: {}/{}", nama_kategori, nama_paket_soal);
+                // Get from database
+                match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
+                    Ok(response) => {
+                        // Cache the response for 1 hour
+                        if let Err(e) = RedisService::cache_quiz(&mut con, cache_key_hash.parse().unwrap_or(0), &response, 3600).await {
+                            eprintln!("Failed to cache paket soal response: {:?}", e);
+                        }
+                        response
+                    },
+                    Err(e) => {
+                        println!("Error: {:?}", e);
+                        return HttpResponse::NotFound().finish();
+                    }
+                }
+            }
+        }
+    } else {
+        // No Redis, get directly from database
+        match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
+            Ok(response) => response,
+            Err(e) => {
+                println!("Error: {:?}", e);
+                return HttpResponse::NotFound().finish();
+            }
         }
     };
     

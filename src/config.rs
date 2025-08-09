@@ -31,6 +31,13 @@ struct PaymentConfig {
 }
 
 #[derive(Deserialize, Clone)]
+struct RedisConfig {
+    host: String,
+    port: u16,
+    password: String,
+}
+
+#[derive(Deserialize, Clone)]
 pub struct Config {
     app: AppConfig,
     dao: DaoConfig,
@@ -40,6 +47,7 @@ pub struct Config {
     auth_url: String,
     google_oauth: GoogleOAuthConfig,
     payment: PaymentConfig,
+    redis: RedisConfig,
 }
 
 impl Config {
@@ -105,5 +113,21 @@ impl Config {
 
     pub fn get_mayar_saas_api_url(&self) -> &str {
         &self.payment.mayar_saas_api_url
+    }
+
+    pub fn get_redis_url(&self) -> String {
+        format!("redis://:{}@{}:{}/", self.redis.password, self.redis.host, self.redis.port)
+    }
+
+    pub fn get_redis_host(&self) -> &str {
+        &self.redis.host
+    }
+
+    pub fn get_redis_port(&self) -> u16 {
+        self.redis.port
+    }
+
+    pub fn get_redis_password(&self) -> &str {
+        &self.redis.password
     }
 }

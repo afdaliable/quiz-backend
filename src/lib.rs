@@ -2,6 +2,7 @@ use supabase_auth::models::{SignUpWithPasswordOptions, AuthClient};
 
 use crate::dao::Database;
 use crate::config::Config;
+use crate::service::redis_service::RedisPool;
 use std::sync::{Arc, Mutex};
 //use sqlx::MySqlPool;
 
@@ -27,4 +28,5 @@ pub struct AppState<'a> {
     pub config: Arc<Config>,
     pub auth_client: AuthClient,
     pub sign_up_with_password_options: SignUpWithPasswordOptions,
+    pub redis_pool: Option<Arc<RedisPool>>,
 }
