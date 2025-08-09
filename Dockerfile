@@ -1,4 +1,4 @@
-FROM rust:1.78-buster AS base_deps
+FROM rust:1.78-bookworm AS base_deps
 # ini untuk base dependency
 RUN apt update -y && apt upgrade -y
 RUN apt install build-essential -y
