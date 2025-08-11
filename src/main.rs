@@ -98,6 +98,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_payment_controller)
             .configure(controller::init_user_controller)
             .configure(controller::init_license_controller)
+            .configure(quiz_backend::controller::quiz_session_controller::configure_routes)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

@@ -11,6 +11,7 @@ pub mod premium_controller;
 pub mod payment_controller;
 pub mod user_controller;
 pub mod license_controller;
+pub mod quiz_session_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;

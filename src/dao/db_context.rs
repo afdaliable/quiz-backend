@@ -12,6 +12,7 @@ use crate::model::ListPaketSoal;
 use crate::model::User;
 use crate::model::ListPaketSoalLengkap;
 use crate::model::Session;
+use crate::model::QuizSession;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -188,6 +189,7 @@ pub struct Database<'c> {
     pub kategori:Arc<Table<'c, KategoriSoal>>,
     pub paket_soal_response: Arc<JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal>>,
     pub sessions: Arc<Table<'c, Session>>,
+    pub quiz_sessions: Arc<Table<'c, QuizSession>>,
     pub premium_plans: Arc<Table<'c, PremiumPlan>>,
     pub user_subscriptions: Arc<Table<'c, UserSubscription>>,
     pub premium_quiz_access: Arc<Table<'c, PremiumQuizAccess>>,
@@ -206,6 +208,7 @@ impl<'a> Database<'a> {
             kategori: Arc::new(Table::new(pool.clone())),
             paket_soal_response: Arc::new(JoinTable::new(pool.clone())),
             sessions: Arc::new(Table::new(pool.clone())),
+            quiz_sessions: Arc::new(Table::new(pool.clone())),
             premium_plans: Arc::new(Table::new(pool.clone())),
             user_subscriptions: Arc::new(Table::new(pool.clone())),
             premium_quiz_access: Arc::new(Table::new(pool.clone())),

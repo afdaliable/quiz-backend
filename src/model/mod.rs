@@ -9,6 +9,7 @@ mod harga_paket;
 pub mod auth;
 pub mod users;
 pub mod session;
+pub mod quiz_session;
 
 // Premium feature models
 pub mod premium_plan;
@@ -29,3 +30,4 @@ pub type HargaPaket = harga_paket::HargaPaket;
 pub use auth::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 pub use users::User;
 pub use session::{Session, SessionResponse};
+pub use quiz_session::{QuizSession, QuizSessionResponse, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest};
