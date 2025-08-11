@@ -120,8 +120,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
     }
 
     pub async fn get_paket_soal_response(&self, nama_kategori: &String, nama_paket_soal: &String) -> Result<PaketSoalResponse, sqlx::Error> {
-        let mut results = sqlx::query_as::<_, PaketSoalResponse>(
-            r#"
+        let query = r#"
             SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
                    s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution,
                    s.sumberfile, s.modul, s.pelajaran, s.tag
@@ -130,20 +129,47 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
             JOIN soal s ON psi.soal_id = s.id 
             WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ?
-            "#,
-        )
-        .bind(nama_kategori)
-        .bind(nama_paket_soal)
-        .fetch_all(&*self.pool)
-        .await?;
+            "#;
+        
+        eprintln!("🔍 [DEBUG] Executing SQL: {}", query);
+        eprintln!("🔍 [DEBUG] With params: kategori='{}', paket_soal='{}'", nama_kategori, nama_paket_soal);
+        
+        let results = sqlx::query_as::<_, PaketSoalResponse>(query)
+            .bind(nama_kategori)
+            .bind(nama_paket_soal)
+            .fetch_all(&*self.pool)
+            .await?;
+
+        eprintln!("🔍 [DEBUG] Query returned {} results", results.len());
 
         if results.is_empty() {
             return Err(sqlx::Error::RowNotFound);
         }
 
-        let mut response = results.remove(0);
-        response.kumpulan_soal.extend(results.into_iter().flat_map(|r| r.kumpulan_soal));
-        Ok(response)
+        // Fix: Store needed values before consuming results
+        let kategori_id = results[0].kategori_id;
+        let nama_kategori = results[0].nama_kategori.clone();
+        let paket_soal_id = results[0].paket_soal_id;
+        let nama_paket_soal = results[0].nama_paket_soal.clone();
+        let is_premium = results[0].is_premium;
+        
+        let mut all_questions = Vec::new();
+        
+        // Extract questions from all results
+        for result in results {
+            all_questions.extend(result.kumpulan_soal);
+        }
+        
+        eprintln!("🔍 [DEBUG] Total questions collected: {}", all_questions.len());
+        
+        Ok(PaketSoalResponse {
+            kategori_id,
+            nama_kategori,
+            paket_soal_id,
+            nama_paket_soal,
+            is_premium,
+            kumpulan_soal: all_questions,
+        })
     }
 
     pub async fn get_paket_soal_by_category(&self, nama_kategori: &String) -> Result<Vec<PaketSoalResponse>, sqlx::Error> {

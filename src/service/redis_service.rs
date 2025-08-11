@@ -139,11 +139,40 @@ impl RedisService {
         con.set_ex(format!("quiz:{}", quiz_id), quiz_json, ttl_seconds as u64).await
     }
 
+    pub async fn cache_quiz_by_key<T: Serialize>(
+        con: &mut ConnectionManager, 
+        cache_key: &str, 
+        quiz: &T,
+        ttl_seconds: usize
+    ) -> RedisResult<()> {
+        let quiz_json = serde_json::to_string(quiz)
+            .map_err(|e| RedisError::from((redis::ErrorKind::TypeError, "JSON serialization failed", e.to_string())))?;
+        
+        con.set_ex(format!("quiz:{}", cache_key), quiz_json, ttl_seconds as u64).await
+    }
+
     pub async fn get_cached_quiz<T: for<'de> Deserialize<'de>>(
         con: &mut ConnectionManager, 
         quiz_id: u64
     ) -> RedisResult<Option<T>> {
         let quiz_data: Option<String> = con.get(format!("quiz:{}", quiz_id)).await?;
+        
+        match quiz_data {
+            Some(data) => {
+                match serde_json::from_str::<T>(&data) {
+                    Ok(quiz) => Ok(Some(quiz)),
+                    Err(_) => Ok(None),
+                }
+            },
+            None => Ok(None),
+        }
+    }
+
+    pub async fn get_cached_quiz_by_key<T: for<'de> Deserialize<'de>>(
+        con: &mut ConnectionManager, 
+        cache_key: &str
+    ) -> RedisResult<Option<T>> {
+        let quiz_data: Option<String> = con.get(format!("quiz:{}", cache_key)).await?;
         
         match quiz_data {
             Some(data) => {

@@ -1,6 +1,6 @@
 use super::Table;
 use crate::model::{QuizSession, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest};
-use sqlx::Error;
+use sqlx::{Error, Row};
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -131,12 +131,15 @@ impl<'c> Table<'c, QuizSession> {
         let now = Utc::now();
         let answers_json = serde_json::to_string(&request.answers).unwrap_or_default();
         
-        // Calculate score based on answers
-        // This is a placeholder - you'll need to implement actual scoring logic
-        // by fetching questions and comparing answers
-        let correct_answers = 0; // TODO: Calculate based on correct answers
-        let incorrect_answers = request.answers.len() as i32 - correct_answers;
-        let score = (correct_answers as f32 / request.answers.len() as f32 * 100.0) as i32;
+        // Get the quiz session to retrieve paket info for scoring
+        let session = self.get_quiz_session_by_id(session_id, user_id).await?;
+        
+        // Calculate score based on actual correct answers
+        let (correct_answers, incorrect_answers, score) = self.calculate_score(
+            &session.kategori_soal, 
+            &session.nama_paket_soal,
+            &request.answers
+        ).await?;
         
         sqlx::query(
             r#"
@@ -255,5 +258,72 @@ impl<'c> Table<'c, QuizSession> {
         .await?;
 
         Ok(result)
+    }
+
+    async fn calculate_score(
+        &self,
+        kategori_soal: &str,
+        nama_paket_soal: &str,
+        user_answers: &[Option<i32>],
+    ) -> Result<(i32, i32, i32), Error> {
+        // Fetch the correct answers from the database using the same query as get_paket_soal_response
+        let paket_response = sqlx::query(
+            r#"
+            SELECT s.correct_answer
+            FROM kategori_soal ks 
+            JOIN paket_soal ps ON ks.id = ps.kategori_id 
+            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
+            JOIN soal s ON psi.soal_id = s.id 
+            WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ?
+            ORDER BY psi.id
+            "#,
+        )
+        .bind(kategori_soal)
+        .bind(nama_paket_soal)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let mut correct_count = 0;
+        let mut incorrect_count = 0;
+
+        for (index, row) in paket_response.iter().enumerate() {
+            if let Some(user_answer) = user_answers.get(index) {
+                if let Some(user_answer) = user_answer {
+                    // Note: 0 is a valid answer (first option), not "no answer"
+                    // No need to skip 0 as it represents the first option
+                    // Get correct answer from database (opt1, opt2, opt3, opt4, opt5)
+                    let correct_answer: String = row.get("correct_answer");
+                    
+                    // Convert correct answer to index (opt1=0, opt2=1, etc. - 0-based indexing)
+                    let correct_index = match correct_answer.as_str() {
+                        "opt1" => 0,
+                        "opt2" => 1, 
+                        "opt3" => 2,
+                        "opt4" => 3,
+                        "opt5" => 4,
+                        _ => 999, // Invalid answer (use 999 so it never matches valid user answers)
+                    };
+
+                    if *user_answer == correct_index {
+                        correct_count += 1;
+                    } else {
+                        incorrect_count += 1;
+                    }
+                } else {
+                    // User didn't answer this question
+                    incorrect_count += 1;
+                }
+            }
+        }
+
+        // Calculate percentage score
+        let total_questions = paket_response.len() as i32;
+        let score = if total_questions > 0 {
+            (correct_count as f32 / total_questions as f32 * 100.0).round() as i32
+        } else {
+            0
+        };
+
+        Ok((correct_count, incorrect_count, score))
     }
 }
