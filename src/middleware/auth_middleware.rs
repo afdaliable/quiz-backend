@@ -1,10 +1,11 @@
-use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage, http::StatusCode};
+use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage, http::StatusCode, FromRequest, HttpRequest};
 use actix_web::http::header;
 use futures::future::{LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
 use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::pin::Pin;
 
 // Supabase JWT Claims
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,6 +46,42 @@ struct UserMetadata {
     email_verified: bool,
     phone_verified: bool,
     sub: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthenticatedUser {
+    pub user_id: String,
+    pub email: Option<String>,
+}
+
+impl FromRequest for AuthenticatedUser {
+    type Error = Error;
+    type Future = Pin<Box<dyn futures::Future<Output = Result<Self, Self::Error>>>>;
+
+    fn from_request(req: &HttpRequest, _payload: &mut actix_web::dev::Payload) -> Self::Future {
+        let user_id = req.headers()
+            .get("user_id")
+            .and_then(|h| h.to_str().ok())
+            .map(|s| s.to_string());
+
+        let email = if let Some(google_claims) = req.extensions().get::<GoogleClaims>() {
+            Some(google_claims.email.clone())
+        } else if let Some(supabase_claims) = req.extensions().get::<SupabaseClaims>() {
+            Some(supabase_claims.email.clone())
+        } else {
+            None
+        };
+
+        Box::pin(async move {
+            match user_id {
+                Some(id) => Ok(AuthenticatedUser { 
+                    user_id: id, 
+                    email 
+                }),
+                None => Err(actix_web::error::ErrorUnauthorized("Missing user authentication")),
+            }
+        })
+    }
 }
 
 pub struct AuthMiddleware {

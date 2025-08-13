@@ -79,17 +79,19 @@ async fn get_paket_soal_response(
 ) -> impl Responder {
     let (nama_kategori, nama_paket_soal) = path.into_inner();
     log_request("GET: /paket-soal-response", &app_state.connections);
+    eprintln!("🚀 [ENDPOINT] get_paket_soal_response called with kategori='{}', paket_soal='{}'", nama_kategori, nama_paket_soal);
     
     // Create cache key
     let cache_key = format!("{}:{}", nama_kategori, nama_paket_soal);
     let cache_key_hash = format!("{:x}", md5::compute(&cache_key));
+    eprintln!("🔑 [CACHE] Cache key: '{}' -> hash: '{}' -> parsed: {}", cache_key, cache_key_hash, cache_key_hash.parse::<u64>().unwrap_or(0));
     
     // Try to get from Redis cache first
     let paket_soal_response = if let Some(redis_pool) = &app_state.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         
         // Try to get from cache
-        match RedisService::get_cached_quiz::<crate::model::PaketSoalResponse>(&mut con, cache_key_hash.parse().unwrap_or(0)).await {
+        match RedisService::get_cached_quiz_by_key::<crate::model::PaketSoalResponse>(&mut con, &cache_key_hash).await {
             Ok(Some(cached_response)) => {
                 println!("Cache hit for paket soal: {}/{}", nama_kategori, nama_paket_soal);
                 cached_response
@@ -100,7 +102,7 @@ async fn get_paket_soal_response(
                 match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
                     Ok(response) => {
                         // Cache the response for 1 hour
-                        if let Err(e) = RedisService::cache_quiz(&mut con, cache_key_hash.parse().unwrap_or(0), &response, 3600).await {
+                        if let Err(e) = RedisService::cache_quiz_by_key(&mut con, &cache_key_hash, &response, 3600).await {
                             eprintln!("Failed to cache paket soal response: {:?}", e);
                         }
                         response
@@ -161,6 +163,7 @@ async fn get_paket_soal_response(
     };
     
     // Return the quiz package with access information
+    eprintln!("📤 [RESPONSE] Returning {} questions in response", paket_soal_response.kumpulan_soal.len());
     HttpResponse::Ok().json(serde_json::json!({
         "success": true,
         "quiz_package": paket_soal_response,

@@ -16,6 +16,7 @@ mod paket_soal_response;
 mod user_dao;
 mod kategori_soal_dao;
 mod session_dao;
+mod quiz_session_dao;
 mod premium_plan_dao;
 mod user_subscription_dao;
 mod premium_quiz_access_dao;
