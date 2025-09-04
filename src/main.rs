@@ -59,17 +59,17 @@ async fn main() -> std::io::Result<()> {
     let app_url = config.get_app_url();
     let jwt_secret = config.get_jwt_secret().to_string();
 
-    // Start a background task to clean up expired sessions
-    let app_state_clone = app_state.clone();
-    tokio::spawn(async move {
-        let mut interval = time::interval(Duration::from_secs(3600)); // Run every hour
-        loop {
-            interval.tick().await;
-            if let Err(e) = app_state_clone.context.sessions.delete_expired_sessions().await {
-                eprintln!("Failed to clean up expired sessions: {:?}", e);
-            }
-        }
-    });
+    // // Start a background task to clean up expired sessions
+    // let app_state_clone = app_state.clone();
+    // tokio::spawn(async move {
+    //     let mut interval = time::interval(Duration::from_secs(3600)); // Run every hour
+    //     loop {
+    //         interval.tick().await;
+    //         if let Err(e) = app_state_clone.context.sessions.delete_expired_sessions().await {
+    //             eprintln!("Failed to clean up expired sessions: {:?}", e);
+    //         }
+    //     }
+    // });
 
     HttpServer::new(move || {
         let cors = Cors::default()
@@ -99,6 +99,11 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_user_controller)
             .configure(controller::init_license_controller)
             .configure(quiz_backend::controller::quiz_session_controller::configure_routes)
+            .configure(controller::init_admin_user_controller)
+            .configure(controller::init_admin_kategori_controller)
+            .configure(controller::init_admin_soal_controller)
+            .configure(controller::init_admin_packages_controller)
+            .configure(controller::init_admin_analytics_controller)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

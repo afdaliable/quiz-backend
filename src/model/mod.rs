@@ -1,11 +1,12 @@
-mod soal;
-mod kategori_soal;
-mod paket_soal;
+pub mod soal;
+pub mod kategori_soal;
+pub mod paket_soal;
 mod paket_soal_item;
 mod paket_soal_response;
 mod list_paket_soal;
 mod list_paket_soal_lengkap;
 mod harga_paket;
+pub mod analytics;
 pub mod auth;
 pub mod users;
 pub mod session;

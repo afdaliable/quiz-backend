@@ -1,0 +1,806 @@
+{
+	"info": {
+		"_postman_id": "admin-quiz-platform-api",
+		"name": "Quiz Platform Admin API",
+		"description": "Complete API collection for Quiz Platform Admin functionality including user management, analytics, questions, categories, and packages.",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Admin Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/auth/login",
+							"host": ["{{base_url}}"],
+							"path": ["auth", "login"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin Users",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/users?page=1&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "search",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "role",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "status",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"role\": \"admin\",\n  \"status\": \"active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/users/{{user_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users", "{{user_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/users/stats",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users", "stats"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Subscriptions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/users/{{user_id}}/subscriptions",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "users", "{{user_id}}", "subscriptions"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin Categories",
+			"item": [
+				{
+					"name": "Get All Categories",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/categories?page=1&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "categories"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Category Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/categories/{{category_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "categories", "{{category_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Category",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama_kategori\": \"New Category\",\n  \"deskripsi\": \"Category description\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/categories",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "categories"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Category",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama_kategori\": \"Updated Category\",\n  \"deskripsi\": \"Updated description\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/categories/{{category_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "categories", "{{category_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Category",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/categories/{{category_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "categories", "{{category_id}}"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin Questions",
+			"item": [
+				{
+					"name": "Get All Questions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/questions?page=1&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "search",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "module",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "subject",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "tag",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Question Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/questions/{{question_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions", "{{question_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Question",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"soal\": \"What is the capital of Indonesia?\",\n  \"opt1\": \"Jakarta\",\n  \"opt2\": \"Bandung\",\n  \"opt3\": \"Surabaya\",\n  \"opt4\": \"Medan\",\n  \"opt5\": \"Yogyakarta\",\n  \"correct_answer\": \"Jakarta\",\n  \"solution\": \"Jakarta is the capital and largest city of Indonesia.\",\n  \"modul\": \"Geography\",\n  \"pelajaran\": \"Indonesian Geography\",\n  \"tag\": \"capitals\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/questions",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Question",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"soal\": \"Updated question text\",\n  \"opt1\": \"Option A\",\n  \"opt2\": \"Option B\",\n  \"opt3\": \"Option C\",\n  \"opt4\": \"Option D\",\n  \"opt5\": \"Option E\",\n  \"correct_answer\": \"Option A\",\n  \"solution\": \"Updated solution explanation\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/questions/{{question_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions", "{{question_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Question",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/questions/{{question_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions", "{{question_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Bulk Import Questions",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"questions\": [\n    {\n      \"soal\": \"Question 1?\",\n      \"opt1\": \"A\",\n      \"opt2\": \"B\",\n      \"opt3\": \"C\",\n      \"opt4\": \"D\",\n      \"opt5\": \"E\",\n      \"correct_answer\": \"A\",\n      \"solution\": \"Solution 1\"\n    },\n    {\n      \"soal\": \"Question 2?\",\n      \"opt1\": \"A\",\n      \"opt2\": \"B\",\n      \"opt3\": \"C\",\n      \"opt4\": \"D\",\n      \"opt5\": \"E\",\n      \"correct_answer\": \"B\",\n      \"solution\": \"Solution 2\"\n    }\n  ]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/questions/bulk-import",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "questions", "bulk-import"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin Packages",
+			"item": [
+				{
+					"name": "Get All Packages",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/packages?page=1&limit=20",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages"],
+							"query": [
+								{
+									"key": "page",
+									"value": "1"
+								},
+								{
+									"key": "limit",
+									"value": "20"
+								},
+								{
+									"key": "search",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "category_id",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "is_premium",
+									"value": "",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Package Details",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Package",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama_paket_soal\": \"New Quiz Package\",\n  \"kategori_id\": 1,\n  \"is_premium\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/packages",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Package",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"nama_paket_soal\": \"Updated Package Name\",\n  \"kategori_id\": 1,\n  \"is_premium\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Package",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Package Questions",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}/questions",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}", "questions"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Questions to Package",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"question_ids\": [1, 2, 3, 4, 5]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}/questions",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}", "questions"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Remove Questions from Package",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"question_ids\": [1, 2, 3]\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}/admin/packages/{{package_id}}/questions/remove",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "packages", "{{package_id}}", "questions", "remove"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Admin Analytics",
+			"item": [
+				{
+					"name": "Dashboard Statistics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/analytics/dashboard",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "analytics", "dashboard"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "User Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/analytics/users",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "analytics", "users"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Quiz Session Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/analytics/quiz-sessions",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "analytics", "quiz-sessions"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Revenue Analytics",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{admin_token}}"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/admin/analytics/revenue",
+							"host": ["{{base_url}}"],
+							"path": ["admin", "analytics", "revenue"]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		},
+		{
+			"key": "admin_token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "user_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "category_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "question_id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "package_id",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

@@ -95,9 +95,10 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 10] = [
+const PUBLIC_ROUTES: [&str; 11] = [
     "/signup",
     "/auth/v1/token",
+    "/auth/login",
     "/swagger-ui",
     "/api-docs/openapi.json",
     "/auth/google/callback",
