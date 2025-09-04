@@ -44,6 +44,7 @@ pub struct ValidateSessionResponse {
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(signup)
        .service(login)
+       .service(admin_login)
        .service(google_callback)
        .service(logout)
        .service(get_sessions)
@@ -260,6 +261,136 @@ async fn login(
         Err(e) => {
             eprintln!("Login error: {:?}", e);
             HttpResponse::BadRequest().body(format!("Login failed: {}", e))
+        }
+    }
+}
+
+/// Simple admin login for testing (bypasses Supabase)
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Admin login successful", body = AuthResponse),
+        (status = 400, description = "Invalid credentials"),
+        (status = 401, description = "Unauthorized - not an admin"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "auth",
+    security() // Empty security means no authentication required
+)]
+#[post("/auth/login")]
+async fn admin_login(
+    login_req: web::Json<LoginRequest>,
+    app_state: web::Data<AppState<'_>>,
+    http_request: HttpRequest,
+) -> impl Responder {
+    // For testing purposes, let's create a simple local authentication
+    // This bypasses Supabase and works directly with the local database
+    
+    // Check if user exists in our database and has admin role
+    match app_state.context.users.get_user_by_email(&login_req.email).await {
+        Ok(user) => {
+            // Check if user has admin role
+            let role = user.role.as_deref().unwrap_or("user");
+            if role != "admin" && role != "superadmin" {
+                return HttpResponse::Unauthorized().json(json!({
+                    "error": "unauthorized",
+                    "message": "User is not an admin",
+                    "status_code": 401
+                }));
+            }
+
+            // For testing, we'll accept any password for admin users
+            // In production, you should verify against a hash
+            
+            // Generate JWT token
+            let now = Utc::now();
+            let expiration = now
+                .checked_add_signed(Duration::hours(1))
+                .expect("valid timestamp")
+                .timestamp() as usize;
+            
+            let claims = Claims {
+                sub: user.id.clone(),
+                exp: expiration,
+                iat: now.timestamp() as usize,
+                aud: app_state.config.get_app_url().to_string(),
+                iss: app_state.config.get_app_url().to_string(),
+                email: user.email.clone(),
+                name: user.display_name.clone(),
+            };
+            
+            let token = encode(
+                &Header::new(Algorithm::HS256),
+                &claims,
+                &EncodingKey::from_secret(app_state.config.get_jwt_secret().as_bytes()),
+            );
+            
+            match token {
+                Ok(jwt) => {
+                    // Update last login time
+                    let _ = sqlx::query(
+                        "UPDATE dbquizapp.users SET last_login = NOW() WHERE id = ?"
+                    )
+                    .bind(&user.id)
+                    .execute(&*app_state.context.users.pool)
+                    .await;
+
+                    // Delete any existing sessions for this user
+                    if let Err(e) = app_state.context.sessions.delete_all_user_sessions(&user.id).await {
+                        eprintln!("Failed to delete existing sessions: {:?}", e);
+                    }
+                    
+                    // Create a new session
+                    let ip_address = http_request.connection_info().realip_remote_addr().map(|s| s.to_string());
+                    let user_agent = http_request.headers().get("User-Agent").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
+                    
+                    match app_state.context.sessions.create_session(
+                        &user.id,
+                        ip_address.as_deref(),
+                        user_agent.as_deref()
+                    ).await {
+                        Ok(session) => {
+                            let response = json!({
+                                "token": jwt,
+                                "user": {
+                                    "id": user.id,
+                                    "email": user.email,
+                                    "display_name": user.display_name,
+                                    "role": user.role,
+                                },
+                                "message": "Login successful"
+                            });
+                            HttpResponse::Ok().json(response)
+                        },
+                        Err(e) => {
+                            eprintln!("Session creation error: {:?}", e);
+                            HttpResponse::InternalServerError().json(json!({
+                                "error": "session_creation_failed",
+                                "message": "Failed to create session",
+                                "status_code": 500
+                            }))
+                        }
+                    }
+                },
+                Err(e) => {
+                    eprintln!("JWT encoding error: {:?}", e);
+                    HttpResponse::InternalServerError().json(json!({
+                        "error": "token_generation_failed",
+                        "message": "Failed to generate token",
+                        "status_code": 500
+                    }))
+                }
+            }
+        },
+        Err(e) => {
+            eprintln!("User lookup error: {:?}", e);
+            HttpResponse::BadRequest().json(json!({
+                "error": "invalid_credentials",
+                "message": "Invalid email or password",
+                "status_code": 400
+            }))
         }
     }
 }

@@ -11,6 +11,9 @@ pub struct User {
     pub display_name: String,
     pub picture_url: Option<String>,
     pub phone_number: Option<String>,
+    pub role: Option<String>,
+    pub status: Option<String>,
+    pub last_login: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
@@ -24,6 +27,9 @@ impl<'c> FromRow<'c, MySqlRow> for User {
             display_name: row.get("display_name"),
             picture_url: row.get("picture_url"),
             phone_number: row.get("phone_number"),
+            role: row.get("role"),
+            status: row.get("status"),
+            last_login: row.get("last_login"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             deleted_at: row.get("deleted_at"),
@@ -59,4 +65,95 @@ pub struct UpdatePhoneNumberResponse {
     pub message: String,
     pub user_id: String,
     pub phone_number: String,
+}
+
+// Admin-specific user model with subscription info
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AdminUser {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub picture_url: Option<String>,
+    pub phone_number: Option<String>,
+    pub role: String,
+    pub status: String,
+    pub last_login: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub subscription_status: Option<String>,
+    pub subscription_end_date: Option<DateTime<Utc>>,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for AdminUser {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(AdminUser {
+            id: row.get("id"),
+            email: row.get("email"),
+            display_name: row.get("display_name"),
+            picture_url: row.get("picture_url"),
+            phone_number: row.get("phone_number"),
+            role: row.get("role"),
+            status: row.get("status"),
+            last_login: row.get("last_login"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+            subscription_status: row.get("subscription_status"),
+            subscription_end_date: row.get("subscription_end_date"),
+        })
+    }
+}
+
+impl<'c> FromRow<'c, MySqlRow> for UserStats {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(UserStats {
+            total_users: row.get("total_users"),
+            active_users: row.get("active_users"),
+            admin_users: row.get("admin_users"),
+            users_with_premium: row.get("users_with_premium"),
+            users_registered_today: row.get("users_registered_today"),
+            users_registered_this_month: row.get("users_registered_this_month"),
+        })
+    }
+}
+
+// Request for creating/updating users by admin
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct AdminUserRequest {
+    pub email: String,
+    pub display_name: String,
+    pub role: Option<String>,
+    pub status: Option<String>,
+    pub phone_number: Option<String>,
+}
+
+// Response for user statistics
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserStats {
+    pub total_users: i64,
+    pub active_users: i64,
+    pub admin_users: i64,
+    pub users_with_premium: i64,
+    pub users_registered_today: i64,
+    pub users_registered_this_month: i64,
+}
+
+// Request for user search/filtering
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserSearchRequest {
+    pub page: Option<u32>,
+    pub limit: Option<u32>,
+    pub search: Option<String>,
+    pub role: Option<String>,
+    pub status: Option<String>,
+    pub has_premium: Option<bool>,
+}
+
+// Paginated user response
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PaginatedUsersResponse {
+    pub users: Vec<AdminUser>,
+    pub total: i64,
+    pub page: u32,
+    pub limit: u32,
+    pub total_pages: u32,
 }
