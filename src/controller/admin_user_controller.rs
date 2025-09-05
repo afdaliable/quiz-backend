@@ -54,11 +54,11 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .wrap(AdminMiddleware::new())
             .service(get_all_users)
             .service(create_user)
+            .service(get_user_stats)  // Move stats before generic /{id} route
             .service(get_user_by_id)
             .service(update_user)
             .service(delete_user)
             .service(get_user_subscriptions)
-            .service(get_user_stats)
     );
 }
 
@@ -99,7 +99,7 @@ async fn get_all_users(
     let total: i64 = match sqlx::query_scalar(
         "SELECT COUNT(*) FROM dbquizapp.users u WHERE u.deleted_at IS NULL"
     )
-    .fetch_one(&*data.context.users.pool)
+    .fetch_one(&*data.context.soal.pool)
     .await 
     {
         Ok(count) => count,
@@ -124,7 +124,13 @@ async fn get_all_users(
                 THEN 'active'
                 ELSE 'inactive'
             END as subscription_status,
-            us.end_date as subscription_end_date
+            us.end_date as subscription_end_date,
+            CASE 
+                WHEN u.picture_url IS NOT NULL AND (u.picture_url LIKE '%googleapis.com%' OR u.picture_url LIKE '%googleusercontent.com%') THEN 'google'
+                WHEN u.picture_url IS NOT NULL AND u.picture_url LIKE '%facebook.com%' THEN 'facebook'
+                WHEN u.picture_url IS NOT NULL THEN 'oauth'
+                ELSE 'local'
+            END as provider
         FROM dbquizapp.users u
         LEFT JOIN dbquizapp.user_subscriptions us ON u.id = us.user_id 
             AND us.status = 'active' 
@@ -136,7 +142,7 @@ async fn get_all_users(
     )
     .bind(limit)
     .bind(offset)
-    .fetch_all(&*data.context.users.pool)
+    .fetch_all(&*data.context.soal.pool)
     .await 
     {
         Ok(users) => users,
@@ -198,7 +204,7 @@ async fn create_user(
     .bind(role)
     .bind(status)
     .bind(&user_req.phone_number)
-    .execute(&*data.context.users.pool)
+    .execute(&*data.context.soal.pool)
     .await;
 
     match result {
@@ -305,7 +311,7 @@ async fn update_user(
     .bind(status)
     .bind(&user_req.phone_number)
     .bind(&user_id)
-    .execute(&*data.context.users.pool)
+    .execute(&*data.context.soal.pool)
     .await;
 
     match result {
@@ -366,7 +372,7 @@ async fn delete_user(
         "UPDATE dbquizapp.users SET deleted_at = NOW() WHERE id = ? AND deleted_at IS NULL"
     )
     .bind(&user_id)
-    .execute(&*data.context.users.pool)
+    .execute(&*data.context.soal.pool)
     .await;
 
     match result {
@@ -464,14 +470,17 @@ async fn get_user_stats(
             (SELECT COUNT(*) FROM dbquizapp.users WHERE deleted_at IS NULL) as total_users,
             (SELECT COUNT(*) FROM dbquizapp.users WHERE status = 'active' AND deleted_at IS NULL) as active_users,
             (SELECT COUNT(*) FROM dbquizapp.users WHERE role IN ('admin', 'superadmin') AND deleted_at IS NULL) as admin_users,
-            (SELECT COUNT(DISTINCT user_id) FROM dbquizapp.user_subscriptions 
-             WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())) as users_with_premium,
+            (SELECT COUNT(DISTINCT u.id) FROM dbquizapp.users u
+             LEFT JOIN dbquizapp.user_subscriptions us ON u.id = us.user_id
+             WHERE u.deleted_at IS NULL 
+               AND us.status = 'active' 
+               AND (us.end_date IS NULL OR us.end_date > NOW())) as users_with_premium,
             (SELECT COUNT(*) FROM dbquizapp.users WHERE DATE(created_at) = CURDATE() AND deleted_at IS NULL) as users_registered_today,
             (SELECT COUNT(*) FROM dbquizapp.users WHERE YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW()) AND deleted_at IS NULL) as users_registered_this_month
     "#;
 
     let result = sqlx::query_as::<_, UserStats>(stats_query)
-        .fetch_one(&*data.context.users.pool)
+        .fetch_one(&*data.context.soal.pool)
         .await;
 
     match result {
@@ -502,7 +511,13 @@ async fn get_user_by_id_internal(
                 THEN 'active'
                 ELSE 'inactive'
             END as subscription_status,
-            us.end_date as subscription_end_date
+            us.end_date as subscription_end_date,
+            CASE 
+                WHEN u.picture_url IS NOT NULL AND (u.picture_url LIKE '%googleapis.com%' OR u.picture_url LIKE '%googleusercontent.com%') THEN 'google'
+                WHEN u.picture_url IS NOT NULL AND u.picture_url LIKE '%facebook.com%' THEN 'facebook'
+                WHEN u.picture_url IS NOT NULL THEN 'oauth'
+                ELSE 'local'
+            END as provider
         FROM dbquizapp.users u
         LEFT JOIN dbquizapp.user_subscriptions us ON u.id = us.user_id 
             AND us.status = 'active' 
@@ -511,6 +526,6 @@ async fn get_user_by_id_internal(
         "#
     )
     .bind(user_id)
-    .fetch_one(&*data.context.users.pool)
+    .fetch_one(&*data.context.soal.pool)
     .await
 }

@@ -18,6 +18,7 @@ pub mod admin_user_controller;
 pub mod admin_kategori_controller;
 pub mod admin_soal_controller;
 pub mod admin_packages_controller;
+pub mod admin_paket_soal_items_controller;
 pub mod admin_analytics_controller;
 
 // pub use group_controller::init as init_group_controller;
@@ -35,6 +36,7 @@ pub use admin_user_controller::init as init_admin_user_controller;
 pub use admin_kategori_controller::init as init_admin_kategori_controller;
 pub use admin_soal_controller::init as init_admin_soal_controller;
 pub use admin_packages_controller::init as init_admin_packages_controller;
+pub use admin_paket_soal_items_controller::init as init_admin_paket_soal_items_controller;
 pub use admin_analytics_controller::init as init_admin_analytics_controller;
 
 fn log_request(route: &'static str, connections: &Mutex<u32>) {

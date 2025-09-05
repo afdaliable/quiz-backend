@@ -1,6 +1,7 @@
 pub mod soal;
 pub mod kategori_soal;
 pub mod paket_soal;
+pub mod paket_soal_items;
 mod paket_soal_item;
 mod paket_soal_response;
 mod list_paket_soal;

@@ -3,6 +3,10 @@ use crate::model::{
     Soal, CreateSoalRequest, SignUpRequest, LoginRequest, 
     AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal, KategoriSoal,ListPaketSoalLengkap
 };
+use crate::model::paket_soal_items::{
+    PaketSoalItem, PaketSoalItemRequest, PaketSoalItemWithDetails,
+    MappingRequest, MappingResponse, AvailableSoal
+};
 // Premium models
 use crate::model::premium_plan::{PremiumPlan, PremiumPlanResponse, CreatePremiumPlanRequest, UpdatePremiumPlanRequest};
 use crate::model::user_subscription::{UserSubscription, UserSubscriptionResponse, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest};
@@ -24,6 +28,12 @@ use crate::controller::payment_controller::PhoneNumberCheckResponse;
         crate::controller::auth_controller::signup,
         crate::controller::auth_controller::login,
         crate::controller::kategori_controller::get_semua_kategori,
+        // Package Questions Mapping endpoints
+        crate::controller::admin_paket_soal_items_controller::get_package_questions,
+        crate::controller::admin_paket_soal_items_controller::get_available_questions,
+        crate::controller::admin_paket_soal_items_controller::map_questions_to_package,
+        crate::controller::admin_paket_soal_items_controller::unmap_questions_from_package,
+        crate::controller::admin_paket_soal_items_controller::delete_mapping,
     ),
     components(
         schemas(
@@ -33,7 +43,10 @@ use crate::controller::payment_controller::PhoneNumberCheckResponse;
             // User phone number schemas
             CheckPhoneNumberRequest, CheckPhoneNumberResponse, 
             UpdatePhoneNumberRequest, UpdatePhoneNumberResponse,
-            PhoneNumberCheckResponse
+            PhoneNumberCheckResponse,
+            // Package Questions Mapping schemas
+            PaketSoalItem, PaketSoalItemRequest, PaketSoalItemWithDetails,
+            MappingRequest, MappingResponse, AvailableSoal
             // Premium schemas are commented out because they don't implement ToSchema
             // PremiumPlan, PremiumPlanResponse, CreatePremiumPlanRequest, UpdatePremiumPlanRequest,
             // UserSubscription, UserSubscriptionResponse, CreateUserSubscriptionRequest, UpdateUserSubscriptionRequest,
@@ -48,7 +61,8 @@ use crate::controller::payment_controller::PhoneNumberCheckResponse;
         (name = "auth", description = "Authentication endpoints using Supabase"),
         (name = "premium", description = "Premium subscription management endpoints"),
         (name = "payment", description = "Payment processing endpoints"),
-        (name = "user", description = "User profile management endpoints")
+        (name = "user", description = "User profile management endpoints"),
+        (name = "Package Questions Mapping", description = "Package and questions mapping management endpoints")
     ),
     modifiers(&SecurityAddon)
 )]

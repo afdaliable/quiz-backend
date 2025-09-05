@@ -82,6 +82,7 @@ pub struct AdminUser {
     pub updated_at: DateTime<Utc>,
     pub subscription_status: Option<String>,
     pub subscription_end_date: Option<DateTime<Utc>>,
+    pub provider: String,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for AdminUser {
@@ -99,6 +100,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminUser {
             updated_at: row.get("updated_at"),
             subscription_status: row.get("subscription_status"),
             subscription_end_date: row.get("subscription_end_date"),
+            provider: row.get("provider"),
         })
     }
 }
