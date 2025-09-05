@@ -18,6 +18,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(search_questions)
             .service(list_questions)
             .service(get_dropdowns)
+            .service(create_question)
             .service(update_question)
             .service(delete_question)
             .service(bulk_import_questions)
@@ -204,6 +205,47 @@ async fn get_question_by_id(
             println!("Error fetching question: {:?}", e);
             HttpResponse::NotFound().json(ErrorResponse {
                 error: "Question not found".to_string(),
+            })
+        }
+    }
+}
+
+/// Create new question
+#[utoipa::path(
+    post,
+    path = "/admin/soal",
+    request_body = CreateSoalRequest,
+    responses(
+        (status = 201, description = "Question created successfully", body = Soal),
+        (status = 400, description = "Invalid question data"),
+        (status = 403, description = "Admin access required"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[post("")]
+async fn create_question(
+    question_req: web::Json<CreateSoalRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/soal", &data.connections);
+
+    // Validate question data
+    if question_req.soal.trim().is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "Question text cannot be empty".to_string(),
+        });
+    }
+
+    match data.context.soal.create_soal(&*question_req).await {
+        Ok(question) => HttpResponse::Created().json(question),
+        Err(e) => {
+            println!("Error creating question: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to create question".to_string(),
             })
         }
     }
