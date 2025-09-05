@@ -1,9 +1,14 @@
 use crate::controller::log_request;
 use crate::middleware::admin_middleware::AdminMiddleware;
-use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchRequest, PaginatedQuestionsResponse, BulkImportRequest, BulkImportResponse, CreateSoalRequest};
+use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchRequest, PaginatedQuestionsResponse, BulkImportRequest, BulkImportResponse, CreateSoalRequest, CsvImportRequest, CsvImportResponse};
+use crate::service::csv_import_service::{CsvImportService, CsvImportConfig};
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
+use actix_multipart::Multipart;
+use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
+use std::io::Write;
+use tempfile::NamedTempFile;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -22,6 +27,9 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(update_question)
             .service(delete_question)
             .service(bulk_import_questions)
+            .service(upload_csv_preview)
+            .service(upload_csv_import)
+            .service(download_csv_template)
             .service(get_question_by_id)
     );
 }
@@ -581,4 +589,293 @@ async fn get_dropdowns(
         subjects,
         tags,
     })
+}
+
+/// Upload CSV file for preview and validation
+#[utoipa::path(
+    post,
+    path = "/admin/soal/upload-csv-preview",
+    request_body(
+        content = String,
+        description = "CSV file content",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "CSV preview generated successfully"),
+        (status = 400, description = "Invalid CSV format or content"),
+        (status = 403, description = "Admin access required"),
+        (status = 413, description = "File too large"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[post("/upload-csv-preview")]
+async fn upload_csv_preview(
+    mut payload: Multipart,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/soal/upload-csv-preview", &data.connections);
+
+    let csv_service = CsvImportService::default();
+    
+    // Process multipart form data
+    while let Some(mut field) = payload.try_next().await.unwrap_or(None) {
+        let content_disposition = field.content_disposition();
+        
+        if let Some(name) = content_disposition.get_name() {
+            if name == "file" {
+                // Read file content
+                let mut file_content = Vec::new();
+                while let Some(chunk) = field.try_next().await.unwrap_or(None) {
+                    file_content.extend_from_slice(&chunk);
+                }
+
+                // Validate file
+                if let Err(e) = csv_service.validate_file(&file_content) {
+                    return HttpResponse::BadRequest().json(ErrorResponse {
+                        error: e,
+                    });
+                }
+
+                // Convert to string
+                let csv_content = match std::str::from_utf8(&file_content) {
+                    Ok(content) => content,
+                    Err(_) => {
+                        return HttpResponse::BadRequest().json(ErrorResponse {
+                            error: "File must be valid UTF-8 text".to_string(),
+                        });
+                    }
+                };
+
+                // Parse and generate preview
+                match csv_service.parse_csv_preview(csv_content).await {
+                    Ok(preview) => {
+                        return HttpResponse::Ok().json(preview);
+                    }
+                    Err(e) => {
+                        return HttpResponse::BadRequest().json(ErrorResponse {
+                            error: e,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    HttpResponse::BadRequest().json(ErrorResponse {
+        error: "No file provided in multipart form data".to_string(),
+    })
+}
+
+/// Upload and import CSV file
+#[utoipa::path(
+    post,
+    path = "/admin/soal/upload-csv-import",
+    request_body(
+        content = String,
+        description = "CSV file content with import options",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "CSV imported successfully"),
+        (status = 400, description = "Invalid CSV format or import failed"),
+        (status = 403, description = "Admin access required"),
+        (status = 413, description = "File too large"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[post("/upload-csv-import")]
+async fn upload_csv_import(
+    mut payload: Multipart,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/soal/upload-csv-import", &data.connections);
+
+    let csv_service = CsvImportService::default();
+    let mut csv_content: Option<String> = None;
+    let mut import_options = CsvImportRequest {
+        skip_invalid_rows: true,
+        max_errors: Some(100),
+        validate_only: false,
+    };
+    
+    // Process multipart form data
+    while let Some(mut field) = payload.try_next().await.unwrap_or(None) {
+        let content_disposition = field.content_disposition();
+        
+        if let Some(name) = content_disposition.get_name() {
+            match name {
+                "file" => {
+                    // Read file content
+                    let mut file_content = Vec::new();
+                    while let Some(chunk) = field.try_next().await.unwrap_or(None) {
+                        file_content.extend_from_slice(&chunk);
+                    }
+
+                    // Validate file
+                    if let Err(e) = csv_service.validate_file(&file_content) {
+                        return HttpResponse::BadRequest().json(ErrorResponse {
+                            error: e,
+                        });
+                    }
+
+                    // Convert to string
+                    match std::str::from_utf8(&file_content) {
+                        Ok(content) => csv_content = Some(content.to_string()),
+                        Err(_) => {
+                            return HttpResponse::BadRequest().json(ErrorResponse {
+                                error: "File must be valid UTF-8 text".to_string(),
+                            });
+                        }
+                    }
+                }
+                "options" => {
+                    // Read import options JSON
+                    let mut options_content = Vec::new();
+                    while let Some(chunk) = field.try_next().await.unwrap_or(None) {
+                        options_content.extend_from_slice(&chunk);
+                    }
+                    
+                    if let Ok(options_str) = std::str::from_utf8(&options_content) {
+                        if let Ok(parsed_options) = serde_json::from_str::<CsvImportRequest>(options_str) {
+                            import_options = parsed_options;
+                        }
+                    }
+                }
+                _ => {} // Ignore other fields
+            }
+        }
+    }
+
+    let csv_content = match csv_content {
+        Some(content) => content,
+        None => {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: "No CSV file provided".to_string(),
+            });
+        }
+    };
+
+    // Parse CSV and get preview
+    let preview = match csv_service.parse_csv_preview(&csv_content).await {
+        Ok(preview) => preview,
+        Err(e) => {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: e,
+            });
+        }
+    };
+
+    // If validate_only is true, return preview
+    if import_options.validate_only {
+        return HttpResponse::Ok().json(preview);
+    }
+
+    // Extract questions to import
+    let questions_to_import = if import_options.skip_invalid_rows {
+        csv_service.extract_questions_from_preview(&preview)
+    } else {
+        if !preview.invalid_questions.is_empty() {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: format!("CSV contains {} invalid rows. Fix errors or set skip_invalid_rows=true", preview.invalid_questions.len()),
+            });
+        }
+        csv_service.extract_questions_from_preview(&preview)
+    };
+
+    if questions_to_import.is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "No valid questions found in CSV file".to_string(),
+        });
+    }
+
+    // Import questions using existing bulk import logic
+    let mut success_count = 0;
+    let mut failed_count = 0;
+    let mut errors = Vec::new();
+
+    for (index, question) in questions_to_import.iter().enumerate() {
+        // Validate question data
+        if question.soal.trim().is_empty() {
+            failed_count += 1;
+            errors.push(format!("Question {}: Question text cannot be empty", index + 1));
+            continue;
+        }
+
+        let result = data.context.soal.create_soal(question).await;
+        match result {
+            Ok(_) => success_count += 1,
+            Err(e) => {
+                failed_count += 1;
+                errors.push(format!("Question {}: {}", index + 1, e));
+                
+                // Check max errors limit
+                if let Some(max_errors) = import_options.max_errors {
+                    if errors.len() >= max_errors {
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let response = CsvImportResponse {
+        success_count,
+        failed_count,
+        skipped_count: preview.invalid_questions.len() as i32,
+        total_processed: (success_count + failed_count) as i32,
+        errors: errors.into_iter().map(|msg| crate::model::soal::CsvImportError {
+            row_number: 0, // Would need more detailed tracking
+            field: "general".to_string(),
+            error_type: "import_error".to_string(),
+            message: msg,
+            suggested_fix: None,
+            raw_value: None,
+        }).collect(),
+        warnings: vec![], // Could add warnings from preview
+        import_id: None,   // Could generate unique import ID
+        estimated_time_seconds: 0, // Already completed
+    };
+
+    HttpResponse::Ok().json(response)
+}
+
+/// Download CSV template for bulk import
+#[utoipa::path(
+    get,
+    path = "/admin/soal/download-csv-template",
+    responses(
+        (status = 200, description = "CSV template downloaded successfully", content_type = "text/csv"),
+        (status = 403, description = "Admin access required"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[get("/download-csv-template")]
+async fn download_csv_template(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("GET /admin/soal/download-csv-template", &data.connections);
+
+    let template_content = r#"question_text,option_1,option_2,option_3,option_4,option_5,correct_answer,solution,module,subject,tag,source_file
+"What is 2+2?","2","3","4","5","","3","2+2 equals 4 because it's basic arithmetic","Basic Math","Mathematics","arithmetic","math-basics.pdf"
+"Which planet is closest to the Sun?","Venus","Mercury","Earth","Mars","","2","Mercury is the closest planet to the Sun","Solar System","Science","astronomy,planets","science-101.pdf"
+"True or False: Paris is the capital of France","True","False","","","","1","Paris is indeed the capital and largest city of France","Geography","Geography","capitals,europe","geography.pdf"
+"Select the largest ocean","Atlantic","Pacific","Indian","Arctic","","2","The Pacific Ocean is the largest ocean on Earth","Oceans","Geography","ocean,geography","earth-science.pdf"
+"What is the result of 5 × 6?","25","30","35","40","","2","5 × 6 = 30. Multiplication of 5 and 6.","Multiplication","Mathematics","multiplication,basic","math-fundamentals.pdf""#;
+
+    HttpResponse::Ok()
+        .content_type("text/csv")
+        .insert_header(("Content-Disposition", "attachment; filename=questions_template.csv"))
+        .body(template_content)
 }

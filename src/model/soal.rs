@@ -37,7 +37,7 @@ pub struct Soal {
 }
 
 /// Request payload for creating a new soal
-#[derive(Debug, Deserialize, Serialize, ToSchema)]
+#[derive(Debug, Deserialize, Serialize, ToSchema, Clone)]
 pub struct CreateSoalRequest {
     /// Question text
     pub soal: String,
@@ -207,4 +207,39 @@ pub struct BulkImportResponse {
     pub success_count: i32,
     pub failed_count: i32,
     pub errors: Vec<String>,
+}
+
+/// Enhanced CSV import request with validation options
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct CsvImportRequest {
+    /// Whether to skip invalid rows or fail completely
+    pub skip_invalid_rows: bool,
+    /// Maximum number of errors to allow before stopping
+    pub max_errors: Option<usize>,
+    /// Whether to validate only or actually import
+    pub validate_only: bool,
+}
+
+/// CSV import response with detailed results
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct CsvImportResponse {
+    pub success_count: i32,
+    pub failed_count: i32,
+    pub skipped_count: i32,
+    pub total_processed: i32,
+    pub errors: Vec<CsvImportError>,
+    pub warnings: Vec<CsvImportError>,
+    pub import_id: Option<String>,
+    pub estimated_time_seconds: u32,
+}
+
+/// Detailed error information for CSV imports
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct CsvImportError {
+    pub row_number: usize,
+    pub field: String,
+    pub error_type: String,
+    pub message: String,
+    pub suggested_fix: Option<String>,
+    pub raw_value: Option<String>,
 }
