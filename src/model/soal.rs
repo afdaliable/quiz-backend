@@ -13,19 +13,19 @@ pub struct Soal {
     /// The question text
     pub soal: String,
     /// First option
-    pub opt1: String,
+    pub opt1: Option<String>,
     /// Second option
-    pub opt2: String,
+    pub opt2: Option<String>,
     /// Third option
-    pub opt3: String,
+    pub opt3: Option<String>,
     /// Fourth option
-    pub opt4: String,
+    pub opt4: Option<String>,
     /// Fifth option
-    pub opt5: String,
+    pub opt5: Option<String>,
     /// The correct answer
-    pub correct_answer: String,
+    pub correct_answer: Option<String>,
     /// Solution explanation
-    pub solution: String,
+    pub solution: Option<String>,
     /// Source file
     pub sumberfile: Option<String>,
     /// Module
