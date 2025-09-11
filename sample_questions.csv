@@ -1,0 +1,6 @@
+question_text,option_1,option_2,option_3,option_4,option_5,correct_answer,solution,module,subject,tag,source_file
+"What is 2+2?","2","3","4","5","","3","2+2 equals 4 because it's basic arithmetic","Basic Math","Mathematics","arithmetic","math-basics.pdf"
+"Which planet is closest to the Sun?","Venus","Mercury","Earth","Mars","","2","Mercury is the closest planet to the Sun","Solar System","Science","astronomy,planets","science-101.pdf"
+"True or False: Paris is the capital of France","True","False","","","","1","Paris is indeed the capital and largest city of France","Geography","Geography","capitals,europe","geography.pdf"
+"Select the largest ocean","Atlantic","Pacific","Indian","Arctic","","2","The Pacific Ocean is the largest ocean on Earth","Oceans","Geography","ocean,geography","earth-science.pdf"
+"What is the result of 5 × 6?","25","30","35","40","","2","5 × 6 = 30. Multiplication of 5 and 6.","Multiplication","Mathematics","multiplication,basic","math-fundamentals.pdf"
