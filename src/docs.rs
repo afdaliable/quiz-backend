@@ -1,7 +1,7 @@
 use utoipa::OpenApi;
 use crate::model::{
-    Soal, CreateSoalRequest, SignUpRequest, LoginRequest, 
-    AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal, KategoriSoal,ListPaketSoalLengkap
+    Soal, LoginRequest,
+    AuthResponse, SupabaseUser, PaketSoalResponse, ListPaketSoal, KategoriSoal, ListPaketSoalLengkap
 };
 use crate::model::paket_soal_items::{
     PaketSoalItem, PaketSoalItemRequest, PaketSoalItemWithDetails,
@@ -23,10 +23,9 @@ use crate::controller::payment_controller::PhoneNumberCheckResponse;
         crate::controller::soal_controller::get_paket_soal_by_category,
         crate::controller::soal_controller::get_list_paket_soal,
         crate::controller::soal_controller::get_list_paket_soal_lengkap,
-        crate::controller::soal_controller::get_all_soal,
-        crate::controller::soal_controller::create_soal,
-        crate::controller::auth_controller::signup,
-        crate::controller::auth_controller::login,
+        crate::controller::soal_controller::check_quiz_access,
+        crate::controller::auth_controller::admin_login,
+        crate::controller::auth_controller::google_callback,
         crate::controller::kategori_controller::get_semua_kategori,
         // Package Questions Mapping endpoints
         crate::controller::admin_paket_soal_items_controller::get_package_questions,
@@ -37,8 +36,8 @@ use crate::controller::payment_controller::PhoneNumberCheckResponse;
     ),
     components(
         schemas(
-            Soal, CreateSoalRequest, 
-            SignUpRequest, LoginRequest, AuthResponse, SupabaseUser,
+            Soal,
+            LoginRequest, AuthResponse, SupabaseUser,
             PaketSoalResponse, ListPaketSoal, KategoriSoal, ListPaketSoalLengkap,
             // User phone number schemas
             CheckPhoneNumberRequest, CheckPhoneNumberResponse, 

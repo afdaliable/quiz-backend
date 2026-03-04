@@ -1,11 +1,11 @@
-use actix_web::{post, web, HttpResponse, Responder, HttpRequest, get, delete};
+use actix_web::{post, web, HttpResponse, Responder, HttpRequest, get};
 use serde_json::json;
 use crate::AppState;
-use crate::model::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
+use crate::model::{LoginRequest, AuthResponse, SupabaseUser};
 use crate::model::session::SessionResponse;
 use crate::utils::google_oauth::GoogleOAuthClient;
 use serde::{Deserialize, Serialize};
-use jsonwebtoken::{encode, Header, EncodingKey, Algorithm, decode, DecodingKey, Validation};
+use jsonwebtoken::{encode, Header, EncodingKey, Algorithm};
 use chrono::{Utc, Duration};
 use oauth2::TokenResponse;
 
@@ -42,230 +42,14 @@ pub struct ValidateSessionResponse {
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.service(signup)
-       .service(login)
-       .service(admin_login)
+    cfg.service(admin_login)
        .service(google_callback)
        .service(logout)
        .service(get_sessions)
        .service(validate_session);
 }
 
-/// Register a new user
-#[utoipa::path(
-    post,
-    path = "/signup",
-    request_body = SignUpRequest,
-    responses(
-        (status = 200, description = "User successfully registered", body = AuthResponse),
-        (status = 400, description = "Invalid registration data"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "auth",
-    security() // Empty security means no authentication required
-)]
-#[post("/signup")]
-async fn signup(
-    signup_req: web::Json<SignUpRequest>,
-    app_state: web::Data<AppState<'_>>,
-    http_request: HttpRequest,
-) -> impl Responder {
-    let mut options = app_state.sign_up_with_password_options.clone();
-    let user_metadata = json!({
-        "display_name": signup_req.display_name.clone(),
-        "raw_user_meta_data": {
-            "display_name": signup_req.display_name.clone()
-        }
-    });
-    
-    options.data = Some(user_metadata);
-
-    // First attempt Supabase signup
-    match app_state.auth_client.sign_up_with_email_and_password(
-        &signup_req.email,
-        &signup_req.password,
-        Some(options)
-    ).await {
-        Ok(session) => {
-            // After successful Supabase signup, store user in local database
-            let user_id = session.user.id.clone();
-            let result = sqlx::query(
-                r#"
-                INSERT INTO users (id, email, display_name)
-                VALUES (?, ?, ?)
-                "#
-            )
-            .bind(&user_id)
-            .bind(&signup_req.email)
-            .bind(&signup_req.display_name)
-            .execute(&*app_state.context.users.pool)
-            .await;
-
-            match result {
-                Ok(_) => {
-                    // Delete any existing sessions for this user (shouldn't exist for new users, but just in case)
-                    if let Err(e) = app_state.context.sessions.delete_all_user_sessions(&user_id).await {
-                        eprintln!("Failed to delete existing sessions: {:?}", e);
-                        // Continue anyway, as this is not critical
-                    }
-                    
-                    // Create a new session
-                    let ip_address = http_request.connection_info().realip_remote_addr().map(|s| s.to_string());
-                    let user_agent = http_request.headers().get("User-Agent").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-                    
-                    match app_state.context.sessions.create_session(
-                        &user_id,
-                        ip_address.as_deref(),
-                        user_agent.as_deref()
-                    ).await {
-                        Ok(db_session) => {
-                            let display_name = signup_req.display_name.clone();
-                            let response = AuthResponse {
-                                access_token: session.access_token,
-                                token_type: "bearer".to_string(),
-                                expires_in: 3600,
-                                refresh_token: db_session.token, // Use our session token instead of Supabase's
-                                user: SupabaseUser {
-                                    id: session.user.id,
-                                    email: session.user.email,
-                                    display_name,
-                                    picture: None,
-                                }
-                            };
-                            HttpResponse::Ok().json(response)
-                        },
-                        Err(e) => {
-                            eprintln!("Session creation error: {:?}", e);
-                            HttpResponse::InternalServerError().body("Failed to create session")
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Database error: {:?}", e);
-                    HttpResponse::InternalServerError().body("Failed to store user data")
-                }
-            }
-        },
-        Err(e) => {
-            eprintln!("Signup error: {:?}", e);
-            HttpResponse::BadRequest().body(format!("Signup failed: {}", e))
-        }
-    }
-}
-
-/// Login with email and password
-#[utoipa::path(
-    post,
-    path = "/auth/v1/token",
-    request_body = LoginRequest,
-    responses(
-        (status = 200, description = "Login successful", body = AuthResponse),
-        (status = 400, description = "Invalid credentials"),
-        (status = 500, description = "Internal server error")
-    ),
-    tag = "auth",
-    security() // Empty security means no authentication required
-)]
-#[post("/auth/v1/token")]
-async fn login(
-    login_req: web::Json<LoginRequest>,
-    app_state: web::Data<AppState<'_>>,
-    http_request: HttpRequest,
-) -> impl Responder {
-    match app_state.auth_client.login_with_email(
-        &login_req.email,
-        &login_req.password
-    ).await {
-        Ok(session) => {
-            // After Supabase authentication, fetch user from our database
-            match app_state.context.users.get_user_by_email(&login_req.email).await {
-                Ok(local_user) => {
-                    // Delete any existing sessions for this user
-                    if let Err(e) = app_state.context.sessions.delete_all_user_sessions(&session.user.id).await {
-                        eprintln!("Failed to delete existing sessions: {:?}", e);
-                        // Continue anyway, as this is not critical
-                    }
-                    
-                    // Create a new session
-                    let ip_address = http_request.connection_info().realip_remote_addr().map(|s| s.to_string());
-                    let user_agent = http_request.headers().get("User-Agent").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-                    
-                    match app_state.context.sessions.create_session(
-                        &session.user.id,
-                        ip_address.as_deref(),
-                        user_agent.as_deref()
-                    ).await {
-                        Ok(db_session) => {
-                            let response = AuthResponse {
-                                access_token: session.access_token,
-                                token_type: "bearer".to_string(),
-                                expires_in: 3600,
-                                refresh_token: db_session.token, // Use our session token instead of Supabase's
-                                user: SupabaseUser {
-                                    id: session.user.id,
-                                    email: session.user.email,
-                                    display_name: local_user.display_name,
-                                    picture: local_user.picture_url,
-                                }
-                            };
-                            HttpResponse::Ok().json(response)
-                        },
-                        Err(e) => {
-                            eprintln!("Session creation error: {:?}", e);
-                            HttpResponse::InternalServerError().body("Failed to create session")
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Failed to fetch user data: {:?}", e);
-                    
-                    // Delete any existing sessions for this user
-                    if let Err(e) = app_state.context.sessions.delete_all_user_sessions(&session.user.id).await {
-                        eprintln!("Failed to delete existing sessions: {:?}", e);
-                        // Continue anyway, as this is not critical
-                    }
-                    
-                    // Create a new session
-                    let ip_address = http_request.connection_info().realip_remote_addr().map(|s| s.to_string());
-                    let user_agent = http_request.headers().get("User-Agent").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-                    
-                    match app_state.context.sessions.create_session(
-                        &session.user.id,
-                        ip_address.as_deref(),
-                        user_agent.as_deref()
-                    ).await {
-                        Ok(db_session) => {
-                            // Still return auth response but with empty display_name
-                            let response = AuthResponse {
-                                access_token: session.access_token,
-                                token_type: "bearer".to_string(),
-                                expires_in: 3600,
-                                refresh_token: db_session.token, // Use our session token instead of Supabase's
-                                user: SupabaseUser {
-                                    id: session.user.id,
-                                    email: session.user.email,
-                                    display_name: String::new(),
-                                    picture: None,
-                                }
-                            };
-                            HttpResponse::Ok().json(response)
-                        },
-                        Err(e) => {
-                            eprintln!("Session creation error: {:?}", e);
-                            HttpResponse::InternalServerError().body("Failed to create session")
-                        }
-                    }
-                }
-            }
-        },
-        Err(e) => {
-            eprintln!("Login error: {:?}", e);
-            HttpResponse::BadRequest().body(format!("Login failed: {}", e))
-        }
-    }
-}
-
-/// Simple admin login for testing (bypasses Supabase)
+/// Simple admin login (bypasses Supabase, requires admin role in database)
 #[utoipa::path(
     post,
     path = "/auth/login",

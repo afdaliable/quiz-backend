@@ -2,26 +2,15 @@ use super::log_request;
 use super::AppState;
 
 // use crate::model::Soal;
-use actix_web::{get, post, put, web, HttpResponse, Responder, HttpRequest};
-use crate::model::CreateSoalRequest;
+use actix_web::{get, web, HttpResponse, Responder, HttpRequest};
 use crate::utils::auth::extract_user_id;
 use crate::service::redis_service::RedisService;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize)]
-struct SetPremiumRequest {
-    is_premium: bool,
-}
-
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(get_soal)
        .service(get_paket_soal_response)
        .service(get_paket_soal_by_category)
        .service(get_list_paket_soal)
        .service(get_list_paket_soal_lengkap)
-       .service(get_all_soal)
-       .service(create_soal)
-       .service(set_quiz_premium)
        .service(check_quiz_access);
 }
 
@@ -202,68 +191,6 @@ async fn get_list_paket_soal(
     }
 }
 
-/// Get all soal (questions)
-#[utoipa::path(
-    get,
-    path = "/kumpulan-soal",
-    responses(
-        (status = 200, description = "List all soal successfully", body = Vec<Soal>),
-        (status = 500, description = "Internal server error")
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
-#[get("/kumpulan-soal")]
-async fn get_all_soal(
-    app_state: web::Data<AppState<'_>>,
-) -> impl Responder {
-    log_request("GET: /kumpulan-soal", &app_state.connections);
-
-    let soal = app_state.context.soal.get_all_soal().await;
-
-    match soal {
-        Err(e) =>{
-            println!("Error: {:?}", e);
-            HttpResponse::InternalServerError().finish()
-        },
-        Ok(soal) => HttpResponse::Ok().json(soal),
-    }
-    
-}
-
-/// Create a new soal
-#[utoipa::path(
-    post,
-    path = "/soal",
-    request_body = CreateSoalRequest,
-    responses(
-        (status = 201, description = "Soal created successfully", body = Soal),
-        (status = 500, description = "Internal server error")
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
-#[post("/soal")]
-async fn create_soal(
-    app_state: web::Data<AppState<'_>>,
-    payload: web::Json<CreateSoalRequest>,
-) -> impl Responder {
-    println!("Received POST request to /soal");  // Add this line
-    log_request("POST: /soal", &app_state.connections);
-
-    let result = app_state.context.soal.create_soal(&payload).await;
-
-    match result {
-        Ok(soal) => HttpResponse::Created().json(soal),
-        Err(e) => {
-            println!("Error creating soal : {:?}", e);
-            HttpResponse::InternalServerError().finish()
-        }
-    }
-}
-
 /// Get paket soal responses by category
 #[utoipa::path(
     get,
@@ -406,116 +333,6 @@ async fn get_list_paket_soal_lengkap(
             HttpResponse::InternalServerError().finish()
         },
         Ok(list_paket_soal) => HttpResponse::Ok().json(list_paket_soal),
-    }
-}
-
-/// Set a quiz package as premium or non-premium
-#[utoipa::path(
-    put,
-    path = "/set-quiz-premium/{paket_soal_id}",
-    request_body = SetPremiumRequest,
-    responses(
-        (status = 200, description = "Quiz package premium status updated successfully"),
-        (status = 401, description = "Unauthorized - No valid token provided"),
-        (status = 403, description = "Forbidden - User does not have admin privileges"),
-        (status = 404, description = "Quiz package not found"),
-        (status = 500, description = "Internal server error")
-    ),
-    params(
-        ("paket_soal_id" = i32, Path, description = "Quiz package ID to update")
-    ),
-    security(
-        ("bearer_auth" = [])
-    )
-)]
-#[put("/set-quiz-premium/{paket_soal_id}")]
-async fn set_quiz_premium(
-    paket_soal_id: web::Path<i32>,
-    req: HttpRequest,
-    payload: web::Json<SetPremiumRequest>,
-    app_state: web::Data<AppState<'_>>,
-) -> impl Responder {
-    log_request("PUT: /set-quiz-premium", &app_state.connections);
-    
-    // Extract user ID from token
-    let user_id_opt = extract_user_id(&req);
-    
-    if user_id_opt.is_none() {
-        return HttpResponse::Unauthorized().json(serde_json::json!({
-            "success": false,
-            "error": "No valid token provided"
-        }));
-    }
-    
-    // TODO: Check if user has admin privileges
-    // For now, we'll just proceed with the update
-    
-    // Update the quiz package premium status
-    let paket_soal_id = paket_soal_id.into_inner();
-    let is_premium = payload.is_premium;
-    
-    // Execute the SQL query to update the premium status
-    let result = sqlx::query(
-        "UPDATE dbquizapp.paket_soal SET is_premium = ? WHERE id = ?"
-    )
-    .bind(is_premium)
-    .bind(paket_soal_id)
-    .execute(&*app_state.context.soal.pool)
-    .await;
-    
-    match result {
-        Ok(result) => {
-            if result.rows_affected() > 0 {
-                // If setting as premium, ensure there's an entry in premium_quiz_access
-                if is_premium {
-                    // Check if there's already an entry
-                    let access = app_state.context.premium_quiz_access
-                        .get_premium_quiz_access_by_paket_soal_id(paket_soal_id)
-                        .await;
-                    
-                    match access {
-                        Ok(None) => {
-                            // No entry exists, create one with default plan ID 1
-                            let create_result = app_state.context.premium_quiz_access
-                                .create_premium_quiz_access(&crate::model::premium_quiz_access::CreatePremiumQuizAccessRequest {
-                                    paket_soal_id,
-                                    min_plan_id: 1, // Default to the basic plan
-                                })
-                                .await;
-                            
-                            if let Err(e) = create_result {
-                                println!("Error creating premium quiz access: {:?}", e);
-                                // Continue anyway, the quiz is marked as premium
-                            }
-                        },
-                        Ok(Some(_)) => {
-                            // Entry already exists, no need to create
-                        },
-                        Err(e) => {
-                            println!("Error checking premium quiz access: {:?}", e);
-                            // Continue anyway, the quiz is marked as premium
-                        }
-                    }
-                }
-                
-                HttpResponse::Ok().json(serde_json::json!({
-                    "success": true,
-                    "message": if is_premium { "Quiz package set as premium" } else { "Quiz package set as non-premium" }
-                }))
-            } else {
-                HttpResponse::NotFound().json(serde_json::json!({
-                    "success": false,
-                    "error": "Quiz package not found"
-                }))
-            }
-        },
-        Err(e) => {
-            println!("Error updating quiz package premium status: {:?}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({
-                "success": false,
-                "error": "Failed to update quiz package premium status"
-            }))
-        }
     }
 }
 
