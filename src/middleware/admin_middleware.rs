@@ -1,12 +1,62 @@
-use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage, http::StatusCode};
-use actix_web::http::header;
+use actix_web::{dev::{Service, ServiceRequest, ServiceResponse, Transform}, Error, HttpMessage, http::{StatusCode, header}};
 use futures::future::{LocalBoxFuture, Ready};
 use std::task::{Context, Poll};
 use std::rc::Rc;
 use std::cell::RefCell;
+use std::sync::OnceLock;
+use jsonwebtoken::{decode, DecodingKey, Validation, Algorithm};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
-// use crate::utils::auth::extract_user_id;
 use crate::AppState;
+
+// Shared HTTP client for Authentik userinfo calls
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .expect("Failed to build HTTP client")
+    })
+}
+
+// Claims from Authentik userinfo endpoint
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AuthentikClaims {
+    pub sub: String,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub groups: Option<Vec<String>>,
+}
+
+// Minimal JWT claims struct for legacy HMAC token fallback
+#[derive(Debug, Serialize, Deserialize)]
+struct LegacyClaims {
+    sub: String,
+    exp: usize,
+}
+
+// Validates Bearer token against Authentik's userinfo endpoint.
+// Returns claims if token is valid, None otherwise.
+async fn validate_authentik_token(token: &str) -> Option<AuthentikClaims> {
+    // Userinfo URL is separate from issuer — Authentik uses a common userinfo endpoint
+    let userinfo_url = std::env::var("AUTHENTIK_USERINFO_URL")
+        .unwrap_or_else(|_| "https://auth.canducation.com/application/o/userinfo/".to_string());
+
+    let response = http_client()
+        .get(&userinfo_url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .ok()?;
+
+    if response.status().is_success() {
+        response.json::<AuthentikClaims>().await.ok()
+    } else {
+        None
+    }
+}
 
 pub struct AdminMiddleware;
 
@@ -54,98 +104,133 @@ where
     }
 
     fn call(&self, req: ServiceRequest) -> Self::Future {
-        println!("Admin middleware: Checking admin access for path: {}", req.path());
-        
-        // Extract user ID from the authenticated request
-        let user_id_opt = req.headers()
-            .get("user_id")
-            .and_then(|h| h.to_str().ok())
-            .map(|s| s.to_string());
+        println!("Admin middleware: checking access for {}", req.path());
 
         let service = self.service.clone();
 
         Box::pin(async move {
-            if let Some(user_id) = user_id_opt {
-                // Get app state to check user role in database
-                if let Some(app_data) = req.app_data::<actix_web::web::Data<AppState>>() {
-                    let app_data_clone = app_data.clone();
-                    
-                    // Check if user has admin role
-                    println!("Admin middleware: Checking role for user_id: {}", user_id);
-                    match check_admin_role(&app_data_clone, &user_id).await {
-                        Ok(true) => {
-                            // User is admin, proceed with request
-                            println!("Admin middleware: User {} is admin, proceeding with request", user_id);
-                            service.borrow_mut().call(req).await
-                        },
-                        Ok(false) => {
-                            // User is not admin
-                            println!("Admin middleware: User {} is NOT admin, denying access", user_id);
-                            let error_response = json!({
-                                "error": "insufficient_permissions",
-                                "message": "You don't have admin permissions to access this resource.",
-                                "status_code": 403
-                            });
-                            
-                            Err(actix_web::error::InternalError::new(
-                                error_response,
-                                StatusCode::FORBIDDEN,
-                            ).into())
-                        },
-                        Err(e) => {
-                            println!("Error checking admin role: {:?}", e);
-                            let error_response = json!({
-                                "error": "database_error",
-                                "message": "Error verifying admin permissions.",
-                                "status_code": 500
-                            });
-                            
-                            Err(actix_web::error::InternalError::new(
-                                error_response,
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                            ).into())
-                        }
-                    }
-                } else {
-                    let error_response = json!({
-                        "error": "app_state_error",
-                        "message": "Unable to verify admin permissions.",
-                        "status_code": 500
-                    });
-                    
-                    Err(actix_web::error::InternalError::new(
-                        error_response,
-                        StatusCode::INTERNAL_SERVER_ERROR,
+            // Extract Bearer token from Authorization header
+            let token = req
+                .headers()
+                .get(header::AUTHORIZATION)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer "))
+                .map(|s| s.to_string());
+
+            let token = match token {
+                Some(t) => t,
+                None => {
+                    return Err(actix_web::error::InternalError::new(
+                        json!({"error": "unauthenticated", "message": "Authorization header required for admin access.", "status_code": 401}),
+                        StatusCode::UNAUTHORIZED,
                     ).into())
                 }
-            } else {
-                // No user ID found (should not happen if auth middleware ran first)
-                let error_response = json!({
-                    "error": "unauthenticated",
-                    "message": "Authentication required for admin access.",
-                    "status_code": 401
-                });
-                
-                Err(actix_web::error::InternalError::new(
-                    error_response,
-                    StatusCode::UNAUTHORIZED,
-                ).into())
+            };
+
+            // ── 1. Try Authentik token validation ────────────────────────────
+            if let Some(claims) = validate_authentik_token(&token).await {
+                let admin_group = std::env::var("AUTHENTIK_ADMIN_GROUP")
+                    .unwrap_or_else(|_| "quiz-admins".to_string());
+
+                let is_admin = claims
+                    .groups
+                    .as_ref()
+                    .map(|groups| groups.iter().any(|g| g == &admin_group))
+                    .unwrap_or(false);
+
+                if !is_admin {
+                    println!(
+                        "Admin middleware: Authentik user {} lacks group '{}'",
+                        claims.email.as_deref().unwrap_or(&claims.sub),
+                        admin_group
+                    );
+                    return Err(actix_web::error::InternalError::new(
+                        json!({"error": "insufficient_permissions", "message": "Admin group membership required.", "status_code": 403}),
+                        StatusCode::FORBIDDEN,
+                    ).into());
+                }
+
+                println!(
+                    "Admin middleware: Authentik admin access granted for {}",
+                    claims.email.as_deref().unwrap_or(&claims.sub)
+                );
+
+                let user_id = claims.sub.clone();
+                req.extensions_mut().insert(claims);
+
+                let mut req = req;
+                if let Ok(v) = header::HeaderValue::from_str(&user_id) {
+                    req.headers_mut().insert(
+                        header::HeaderName::from_static("user_id"),
+                        v,
+                    );
+                }
+                return service.borrow_mut().call(req).await;
             }
+
+            // ── 2. Fallback: legacy HMAC JWT + DB role check ──────────────────
+            if let Some(app_data) = req.app_data::<actix_web::web::Data<AppState>>() {
+                let jwt_secret = app_data.config.get_jwt_secret().to_string();
+
+                let mut validation = Validation::new(Algorithm::HS256);
+                validation.validate_exp = true;
+                validation.validate_aud = false;
+                validation.required_spec_claims.remove("iss");
+
+                if let Ok(token_data) = decode::<LegacyClaims>(
+                    &token,
+                    &DecodingKey::from_secret(jwt_secret.as_bytes()),
+                    &validation,
+                ) {
+                    let user_id = token_data.claims.sub.clone();
+
+                    match check_admin_role(app_data, &user_id).await {
+                        Ok(true) => {
+                            println!("Admin middleware: legacy admin access granted for {}", user_id);
+                            let mut req = req;
+                            if let Ok(v) = header::HeaderValue::from_str(&user_id) {
+                                req.headers_mut().insert(
+                                    header::HeaderName::from_static("user_id"),
+                                    v,
+                                );
+                            }
+                            return service.borrow_mut().call(req).await;
+                        }
+                        Ok(false) => {
+                            return Err(actix_web::error::InternalError::new(
+                                json!({"error": "insufficient_permissions", "message": "You don't have admin permissions.", "status_code": 403}),
+                                StatusCode::FORBIDDEN,
+                            ).into());
+                        }
+                        Err(e) => {
+                            println!("Admin middleware: DB error checking role: {:?}", e);
+                        }
+                    }
+                }
+            }
+
+            // ── 3. All validation paths failed ────────────────────────────────
+            Err(actix_web::error::InternalError::new(
+                json!({"error": "invalid_token", "message": "Invalid or expired token.", "status_code": 401}),
+                StatusCode::UNAUTHORIZED,
+            ).into())
         })
     }
 }
 
-// Helper function to check if user has admin role
-async fn check_admin_role(app_state: &actix_web::web::Data<AppState<'_>>, user_id: &str) -> Result<bool, sqlx::Error> {
+async fn check_admin_role(
+    app_state: &actix_web::web::Data<AppState<'_>>,
+    user_id: &str,
+) -> Result<bool, sqlx::Error> {
     let result = sqlx::query_scalar::<_, Option<String>>(
-        "SELECT role FROM dbquizapp.users WHERE id = ? AND deleted_at IS NULL"
+        "SELECT role FROM dbquizapp.users WHERE id = ? AND deleted_at IS NULL",
     )
     .bind(user_id)
     .fetch_optional(&*app_state.context.users.pool)
     .await?;
-    
+
     match result {
         Some(Some(role)) => Ok(role == "admin" || role == "superadmin"),
-        _ => Ok(false), // User not found or has no role
+        _ => Ok(false),
     }
 }

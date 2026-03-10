@@ -264,7 +264,7 @@ async fn update_category(
     }
 
     let result = sqlx::query(
-        "UPDATE dbquizapp.kategori_soal SET nama_kategori = ?, updated_at = NOW() WHERE id = ?"
+        "UPDATE dbquizapp.kategori_soal SET nama_kategori = ? WHERE id = ?"
     )
     .bind(&category_req.nama_kategori)
     .bind(category_id)

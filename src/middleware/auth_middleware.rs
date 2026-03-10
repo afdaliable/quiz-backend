@@ -95,12 +95,12 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 15] = [
+const PUBLIC_ROUTES: [&str; 17] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
     "/api/auth/v1/token",  // API-prefixed version
-    "/api/auth/login",     // API-prefixed version  
+    "/api/auth/login",     // API-prefixed version
     "/swagger-ui",
     "/api-docs/openapi.json",
     "/auth/google/callback",
@@ -110,7 +110,9 @@ const PUBLIC_ROUTES: [&str; 15] = [
     "/api/user/update-phone",
     "/payment/webhook",
     "/api/payment/webhook",  // API-prefixed version
-    "/license-public"
+    "/license-public",
+    "/admin",     // Admin routes handle their own auth via Authentik
+    "/api/admin", // API-prefixed version
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
