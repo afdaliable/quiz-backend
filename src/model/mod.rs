@@ -32,4 +32,4 @@ pub type HargaPaket = harga_paket::HargaPaket;
 pub use auth::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 pub use users::User;
 pub use session::{Session, SessionResponse};
-pub use quiz_session::{QuizSession, QuizSessionResponse, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest};
+pub use quiz_session::{QuizSession, QuizSessionResponse, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest, LeaderboardEntry, LeaderboardQuery, QuizHistoryResponse, QuizHistoryQuery};

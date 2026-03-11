@@ -88,6 +88,50 @@ pub struct QuizSessionResponse {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LeaderboardEntry {
+    pub rank: i64,
+    pub user_id: String,
+    pub display_name: String,
+    pub picture_url: Option<String>,
+    pub best_score: i32,
+    pub total_quizzes: i64,
+    pub correct_answers: i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LeaderboardQuery {
+    pub paket_soal_id: Option<i32>,
+    pub limit: Option<i32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuizHistoryEntry {
+    pub id: String,
+    pub package_name: String,
+    pub category: String,
+    pub score: i32,
+    pub correct: i32,
+    pub wrong: i32,
+    pub total: i32,
+    pub duration_seconds: i32,
+    pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuizHistoryResponse {
+    pub data: Vec<QuizHistoryEntry>,
+    pub total: i64,
+    pub page: i64,
+    pub limit: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuizHistoryQuery {
+    pub page: Option<i64>,
+    pub limit: Option<i64>,
+}
+
 impl From<QuizSession> for QuizSessionResponse {
     fn from(session: QuizSession) -> Self {
         let answers: Vec<Option<i32>> = session.answers
