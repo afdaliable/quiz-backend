@@ -347,17 +347,17 @@ impl<'c> Table<'c, QuizSession> {
         .fetch_one(&*self.pool)
         .await?;
 
-        // Get paginated rows
+        // Get paginated rows — total_questions from paket_soal_items (not correct+incorrect)
         let rows = sqlx::query(
             r#"
-            SELECT id, nama_paket_soal, kategori_soal, score,
-                   correct_answers, incorrect_answers,
-                   (correct_answers + incorrect_answers) AS total_questions,
-                   (total_time - COALESCE(time_remaining, 0)) AS duration_seconds,
-                   updated_at
-            FROM quiz_sessions
-            WHERE user_id = ? AND is_completed = TRUE
-            ORDER BY updated_at DESC
+            SELECT qs.id, qs.nama_paket_soal, qs.kategori_soal, qs.score,
+                   qs.correct_answers, qs.incorrect_answers,
+                   (SELECT COUNT(*) FROM paket_soal_items psi WHERE psi.paket_soal_id = qs.paket_soal_id) AS total_questions,
+                   (qs.total_time - COALESCE(qs.time_remaining, 0)) AS duration_seconds,
+                   qs.updated_at
+            FROM quiz_sessions qs
+            WHERE qs.user_id = ? AND qs.is_completed = TRUE
+            ORDER BY qs.updated_at DESC
             LIMIT ? OFFSET ?
             "#,
         )
@@ -369,16 +369,23 @@ impl<'c> Table<'c, QuizSession> {
 
         let data = rows
             .into_iter()
-            .map(|row| QuizHistoryEntry {
-                id: row.get("id"),
-                package_name: row.get("nama_paket_soal"),
-                category: row.get("kategori_soal"),
-                score: row.get("score"),
-                correct: row.get("correct_answers"),
-                wrong: row.get("incorrect_answers"),
-                total: row.get("total_questions"),
-                duration_seconds: row.get("duration_seconds"),
-                completed_at: row.get("updated_at"),
+            .map(|row| {
+                let correct: i32 = row.get("correct_answers");
+                let wrong: i32 = row.get("incorrect_answers");
+                let total: i32 = row.get("total_questions");
+                let unanswered = (total - correct - wrong).max(0);
+                QuizHistoryEntry {
+                    id: row.get("id"),
+                    package_name: row.get("nama_paket_soal"),
+                    category: row.get("kategori_soal"),
+                    score: row.get("score"),
+                    correct,
+                    wrong,
+                    unanswered,
+                    total,
+                    duration_seconds: row.get("duration_seconds"),
+                    completed_at: row.get("updated_at"),
+                }
             })
             .collect();
 
@@ -434,10 +441,8 @@ impl<'c> Table<'c, QuizSession> {
                     } else {
                         incorrect_count += 1;
                     }
-                } else {
-                    // User didn't answer this question
-                    incorrect_count += 1;
                 }
+                // else: user_answer is None — question was left unanswered, not counted as wrong
             }
         }
 

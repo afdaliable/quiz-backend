@@ -113,6 +113,7 @@ pub struct QuizHistoryEntry {
     pub score: i32,
     pub correct: i32,
     pub wrong: i32,
+    pub unanswered: i32,
     pub total: i32,
     pub duration_seconds: i32,
     pub completed_at: DateTime<Utc>,
