@@ -17,6 +17,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route("/check-phone", web::post().to(check_phone_number))
             .route("/update-phone", web::post().to(update_phone_number))
             .route("/quiz-history", web::get().to(get_quiz_history))
+            .route("/profile", web::get().to(get_user_profile))
+            .route("/stats", web::get().to(get_user_stats))
     );
 }
 
@@ -144,4 +146,51 @@ async fn update_phone_number(
             error: format!("Failed to get user: {}", e),
         }),
     }
-} 
+}
+
+/// Get profile of the authenticated user
+async fn get_user_profile(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("/user/profile", &data.connections);
+
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    match data.context.users.get_user_profile_with_subscription(&user_id).await {
+        Ok(Some(profile)) => HttpResponse::Ok().json(profile),
+        Ok(None) => HttpResponse::NotFound().json(ErrorResponse {
+            error: format!("User with ID {} not found", user_id),
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to get user profile: {}", e),
+        }),
+    }
+}
+
+/// Get learning statistics of the authenticated user
+async fn get_user_stats(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("/user/stats", &data.connections);
+
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    match data.context.users.get_user_learning_stats(&user_id).await {
+        Ok(stats) => HttpResponse::Ok().json(stats),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to get user stats: {}", e),
+        }),
+    }
+}
