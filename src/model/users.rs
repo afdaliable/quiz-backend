@@ -159,3 +159,24 @@ pub struct PaginatedUsersResponse {
     pub limit: u32,
     pub total_pages: u32,
 }
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserProfileResponse {
+    pub id: String,
+    pub email: String,
+    pub display_name: String,
+    pub picture_url: Option<String>,
+    pub joined_at: DateTime<Utc>,
+    pub account_status: String, // "Free" | "Premium"
+    pub premium_expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct UserLearningStatsResponse {
+    pub total_quizzes: i64,
+    pub avg_score: f64,
+    pub favorite_category: Option<String>,
+    pub learning_streak_days: i64,
+    pub total_correct: i64,
+    pub total_questions: i64,
+}
