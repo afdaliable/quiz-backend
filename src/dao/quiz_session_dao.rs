@@ -1,5 +1,6 @@
 use super::Table;
-use crate::model::{QuizSession, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest};
+use crate::model::{QuizSession, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest, LeaderboardEntry};
+use crate::model::quiz_session::{QuizHistoryEntry, QuizHistoryResponse};
 use sqlx::{Error, Row};
 use chrono::Utc;
 use uuid::Uuid;
@@ -258,6 +259,130 @@ impl<'c> Table<'c, QuizSession> {
         .await?;
 
         Ok(result)
+    }
+
+    pub async fn get_leaderboard(
+        &self,
+        paket_soal_id: Option<i32>,
+        limit: i32,
+    ) -> Result<Vec<LeaderboardEntry>, Error> {
+        let rows = if let Some(paket_id) = paket_soal_id {
+            sqlx::query(
+                r#"
+                SELECT
+                    u.id AS user_id,
+                    u.display_name,
+                    u.picture_url,
+                    MAX(qs.score) AS best_score,
+                    COUNT(qs.id) AS total_quizzes,
+                    MAX(qs.correct_answers) AS correct_answers
+                FROM quiz_sessions qs
+                JOIN users u ON qs.user_id = u.id
+                WHERE qs.is_completed = TRUE AND qs.paket_soal_id = ?
+                GROUP BY u.id, u.display_name, u.picture_url
+                ORDER BY best_score DESC, correct_answers DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(paket_id)
+            .bind(limit)
+            .fetch_all(&*self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT
+                    u.id AS user_id,
+                    u.display_name,
+                    u.picture_url,
+                    MAX(qs.score) AS best_score,
+                    COUNT(qs.id) AS total_quizzes,
+                    MAX(qs.correct_answers) AS correct_answers
+                FROM quiz_sessions qs
+                JOIN users u ON qs.user_id = u.id
+                WHERE qs.is_completed = TRUE
+                GROUP BY u.id, u.display_name, u.picture_url
+                ORDER BY best_score DESC, correct_answers DESC
+                LIMIT ?
+                "#,
+            )
+            .bind(limit)
+            .fetch_all(&*self.pool)
+            .await?
+        };
+
+        let entries = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, row)| LeaderboardEntry {
+                rank: (i + 1) as i64,
+                user_id: row.get("user_id"),
+                display_name: row.get("display_name"),
+                picture_url: row.get("picture_url"),
+                best_score: row.get("best_score"),
+                total_quizzes: row.get("total_quizzes"),
+                correct_answers: row.get("correct_answers"),
+            })
+            .collect();
+
+        Ok(entries)
+    }
+
+    pub async fn get_user_quiz_history(
+        &self,
+        user_id: &str,
+        page: i64,
+        limit: i64,
+    ) -> Result<QuizHistoryResponse, Error> {
+        let offset = (page - 1) * limit;
+
+        // Get total count
+        let total: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            "#,
+        )
+        .bind(user_id)
+        .fetch_one(&*self.pool)
+        .await?;
+
+        // Get paginated rows
+        let rows = sqlx::query(
+            r#"
+            SELECT id, nama_paket_soal, kategori_soal, score,
+                   correct_answers, incorrect_answers,
+                   (correct_answers + incorrect_answers) AS total_questions,
+                   (total_time - COALESCE(time_remaining, 0)) AS duration_seconds,
+                   updated_at
+            FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            ORDER BY updated_at DESC
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(user_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let data = rows
+            .into_iter()
+            .map(|row| QuizHistoryEntry {
+                id: row.get("id"),
+                package_name: row.get("nama_paket_soal"),
+                category: row.get("kategori_soal"),
+                score: row.get("score"),
+                correct: row.get("correct_answers"),
+                wrong: row.get("incorrect_answers"),
+                total: row.get("total_questions"),
+                duration_seconds: row.get("duration_seconds"),
+                completed_at: row.get("updated_at"),
+            })
+            .collect();
+
+        Ok(QuizHistoryResponse { data, total, page, limit })
     }
 
     async fn calculate_score(

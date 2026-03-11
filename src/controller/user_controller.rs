@@ -1,5 +1,6 @@
 use crate::controller::log_request;
 use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse};
+use crate::model::{QuizHistoryQuery};
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
         web::scope("/user")
             .route("/check-phone", web::post().to(check_phone_number))
             .route("/update-phone", web::post().to(update_phone_number))
+            .route("/quiz-history", web::get().to(get_quiz_history))
     );
 }
 
@@ -55,6 +57,32 @@ async fn check_phone_number(
         }),
         Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
             error: format!("Failed to get user: {}", e),
+        }),
+    }
+}
+
+/// Get quiz history for the authenticated user
+async fn get_quiz_history(
+    query: web::Query<QuizHistoryQuery>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("/user/quiz-history", &data.connections);
+
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).min(100).max(1);
+
+    match data.context.quiz_sessions.get_user_quiz_history(&user_id, page, limit).await {
+        Ok(history) => HttpResponse::Ok().json(history),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to fetch quiz history: {}", e),
         }),
     }
 }
