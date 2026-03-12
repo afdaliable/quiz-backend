@@ -428,6 +428,7 @@ impl CsvImportService {
         let question = if errors.is_empty() {
             Some(CreateSoalRequest {
                 soal: question_text,
+                question_type: None, // defaults to "multiple_choice" in DAO
                 opt1,
                 opt2,
                 opt3,

@@ -296,16 +296,18 @@ async fn update_question(
         });
     }
 
+    let question_type = question_req.question_type.as_deref().unwrap_or("multiple_choice");
     let result = sqlx::query(
         r#"
-        UPDATE dbquizapp.soal 
-        SET soal = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
-            correct_answer = ?, solution = ?, sumberfile = ?, modul = ?, 
+        UPDATE dbquizapp.soal
+        SET soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
+            correct_answer = ?, solution = ?, sumberfile = ?, modul = ?,
             pelajaran = ?, tag = ?, updated_at = NOW()
         WHERE id = ?
         "#
     )
     .bind(&question_req.soal)
+    .bind(question_type)
     .bind(&question_req.opt1)
     .bind(&question_req.opt2)
     .bind(&question_req.opt3)

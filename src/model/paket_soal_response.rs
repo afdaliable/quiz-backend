@@ -27,6 +27,7 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
             kumpulan_soal: vec![Soal {
                 id: row.get("soal_id"),
                 soal: row.get("soal"),
+                question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
                 opt1: row.get("opt1"),
                 opt2: row.get("opt2"),
                 opt3: row.get("opt3"),
