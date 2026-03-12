@@ -12,6 +12,8 @@ pub struct Soal {
     pub id: i32,
     /// The question text
     pub soal: String,
+    /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
+    pub question_type: String,
     /// First option
     pub opt1: Option<String>,
     /// Second option
@@ -31,7 +33,7 @@ pub struct Soal {
     /// Module
     pub modul: Option<String>,
     /// Subject/Lesson
-    pub pelajaran: Option<String>,  
+    pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
 }
@@ -41,6 +43,8 @@ pub struct Soal {
 pub struct CreateSoalRequest {
     /// Question text
     pub soal: String,
+    /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
+    pub question_type: Option<String>,
     /// First option
     pub opt1: String,
     /// Second option
@@ -68,19 +72,20 @@ pub struct CreateSoalRequest {
 impl<'c> FromRow<'c, MySqlRow> for Soal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(Soal {
-            id: row.get(0),
-            soal: row.get(1),
-            opt1: row.get(2),
-            opt2: row.get(3),
-            opt3: row.get(4),
-            opt4: row.get(5),
-            opt5: row.get(6),
-            correct_answer: row.get(7),
-            solution: row.get(8),
-            sumberfile: row.get(9),
-            modul: row.get(10),
-            pelajaran: row.get(11),
-            tag: row.get(12),
+            id: row.get("id"),
+            soal: row.get("soal"),
+            question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
+            opt1: row.get("opt1"),
+            opt2: row.get("opt2"),
+            opt3: row.get("opt3"),
+            opt4: row.get("opt4"),
+            opt5: row.get("opt5"),
+            correct_answer: row.get("correct_answer"),
+            solution: row.get("solution"),
+            sumberfile: row.get("sumberfile"),
+            modul: row.get("modul"),
+            pelajaran: row.get("pelajaran"),
+            tag: row.get("tag"),
         })
     }
 }
@@ -92,6 +97,8 @@ pub struct AdminSoal {
     pub id: i32,
     /// The question text
     pub soal: String,
+    /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
+    pub question_type: String,
     /// First option
     pub opt1: Option<String>,
     /// Second option
@@ -127,6 +134,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
         Ok(AdminSoal {
             id: row.get("id"),
             soal: row.get("soal"),
+            question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
             opt1: row.get("opt1"),
             opt2: row.get("opt2"),
             opt3: row.get("opt3"),
@@ -171,6 +179,8 @@ pub struct PaginatedQuestionsResponse {
 pub struct UpdateSoalRequest {
     /// Question text
     pub soal: String,
+    /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
+    pub question_type: Option<String>,
     /// First option
     pub opt1: String,
     /// Second option
