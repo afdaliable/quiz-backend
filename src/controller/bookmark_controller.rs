@@ -5,10 +5,16 @@ use actix_web::{web, HttpResponse, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
+use sqlx::mysql::MySqlRow;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
     pub error: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct CountResult {
+    count: i64,
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {
@@ -56,14 +62,14 @@ pub async fn bookmark_question(
     };
 
     // Check if question exists
-    let question_exists: bool = match sqlx::query::<_, (i32,)>(
-        "SELECT COUNT(*) FROM dbquizapp.soal WHERE id = ?"
+    let question_exists: bool = match sqlx::query_as::<_, CountResult>(
+        "SELECT COUNT(*) as count FROM dbquizapp.soal WHERE id = ?"
     )
     .bind(question_id)
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(Some((count,))) => count > 0,
+        Ok(Some(result)) => result.count > 0,
         Ok(None) => false,
         Err(_) => false,
     };
@@ -78,15 +84,15 @@ pub async fn bookmark_question(
     let bookmark_id = Uuid::new_v4().to_string();
 
     // Check if already bookmarked
-    let already_bookmarked: bool = match sqlx::query::<_, (i32,)>(
-        "SELECT COUNT(*) FROM dbquizapp.bookmarked_questions WHERE user_id = ? AND question_id = ?"
+    let already_bookmarked: bool = match sqlx::query_as::<_, CountResult>(
+        "SELECT COUNT(*) as count FROM dbquizapp.bookmarked_questions WHERE user_id = ? AND question_id = ?"
     )
     .bind(&user_id)
     .bind(question_id)
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(Some((count,))) => count > 0,
+        Ok(Some(result)) => result.count > 0,
         Ok(None) => false,
         Err(_) => false,
     };
@@ -109,14 +115,14 @@ pub async fn bookmark_question(
     {
         Ok(_) => {
             // Get total bookmark count
-            let bookmark_count = match sqlx::query::<_, (i32,)>(
-                "SELECT COUNT(*) FROM dbquizapp.bookmarked_questions WHERE user_id = ?"
+            let bookmark_count = match sqlx::query_as::<_, CountResult>(
+                "SELECT COUNT(*) as count FROM dbquizapp.bookmarked_questions WHERE user_id = ?"
             )
             .bind(&user_id)
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(Some((count,))) => count,
+                Ok(Some(result)) => result.count as i32,
                 Ok(None) => 0,
                 Err(_) => 0,
             };
@@ -189,14 +195,14 @@ pub async fn unbookmark_question(
             }
 
             // Get total bookmark count
-            let bookmark_count = match sqlx::query::<_, (i32,)>(
-                "SELECT COUNT(*) FROM dbquizapp.bookmarked_questions WHERE user_id = ?"
+            let bookmark_count = match sqlx::query_as::<_, CountResult>(
+                "SELECT COUNT(*) as count FROM dbquizapp.bookmarked_questions WHERE user_id = ?"
             )
             .bind(&user_id)
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(Some((count,))) => count,
+                Ok(Some(result)) => result.count as i32,
                 Ok(None) => 0,
                 Err(_) => 0,
             };

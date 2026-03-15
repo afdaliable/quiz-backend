@@ -55,7 +55,7 @@ pub struct BookmarkedQuestion {
     pub created_at: String,
 }
 
-impl<'c> sqlx::FromRow<'c, sqlx::MySqlRow> for BookmarkedQuestion {
+impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
     fn from_row(row: &'c sqlx::MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(BookmarkedQuestion {
             id: row.get("id"),
