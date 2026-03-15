@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use sqlx::mysql::MySqlRow;
-use sqlx::FromRow;
+use sqlx::{FromRow, Row};
 
 /// Response when bookmarking/unbookmarking a question
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
