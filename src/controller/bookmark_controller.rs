@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 use sqlx::mysql::MySqlRow;
+use sqlx::FromRow;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
@@ -69,8 +70,7 @@ pub async fn bookmark_question(
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(Some(result)) => result.count > 0,
-        Ok(None) => false,
+        Ok(result) => result.map_or(0, |r| r.count) > 0,
         Err(_) => false,
     };
 
@@ -92,8 +92,7 @@ pub async fn bookmark_question(
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(Some(result)) => result.count > 0,
-        Ok(None) => false,
+        Ok(result) => result.map_or(0, |r| r.count) > 0,
         Err(_) => false,
     };
 
@@ -122,8 +121,7 @@ pub async fn bookmark_question(
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(Some(result)) => result.count as i32,
-                Ok(None) => 0,
+                Ok(result) => result.map_or(0, |r| r.count as i32),
                 Err(_) => 0,
             };
 
@@ -202,8 +200,7 @@ pub async fn unbookmark_question(
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(Some(result)) => result.count as i32,
-                Ok(None) => 0,
+                Ok(result) => result.map_or(0, |r| r.count as i32),
                 Err(_) => 0,
             };
 

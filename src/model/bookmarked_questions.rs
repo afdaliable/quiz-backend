@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use sqlx::mysql::MySqlRow;
+use sqlx::FromRow;
 
 /// Response when bookmarking/unbookmarking a question
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -56,7 +57,7 @@ pub struct BookmarkedQuestion {
 }
 
 impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
-    fn from_row(row: &'c sqlx::MySqlRow) -> Result<Self, sqlx::Error> {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(BookmarkedQuestion {
             id: row.get("id"),
             question_id: row.get("question_id"),
