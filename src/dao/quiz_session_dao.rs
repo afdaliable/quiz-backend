@@ -1,9 +1,11 @@
 use super::Table;
 use crate::model::{QuizSession, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest, LeaderboardEntry};
-use crate::model::quiz_session::{QuizHistoryEntry, QuizHistoryResponse};
+use crate::model::quiz_session::{QuizHistoryEntry, QuizHistoryResponse, StartRandomSessionRequest, StartRandomSessionResponse, RandomSessionSoal};
 use sqlx::{Error, Row};
 use chrono::Utc;
 use uuid::Uuid;
+use std::collections::HashMap;
+use rand::seq::SliceRandom;
 
 impl<'c> Table<'c, QuizSession> {
     pub async fn create_quiz_session(
@@ -13,15 +15,16 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<QuizSession, Error> {
         let session_id = Uuid::new_v4().to_string();
         let now = Utc::now();
-        
+
         sqlx::query(
             r#"
             INSERT INTO quiz_sessions (
-                id, user_id, paket_soal_id, kategori_soal, nama_paket_soal, 
-                total_time, current_question, is_completed, score, 
+                id, user_id, paket_soal_id, kategori_soal, nama_paket_soal,
+                session_type, question_ids,
+                total_time, current_question, is_completed, score,
                 correct_answers, incorrect_answers, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 0, FALSE, 0, 0, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, 'standard', NULL, ?, 0, FALSE, 0, 0, 0, ?, ?)
             "#,
         )
         .bind(&session_id)
@@ -34,8 +37,160 @@ impl<'c> Table<'c, QuizSession> {
         .bind(now)
         .execute(&*self.pool)
         .await?;
-        
+
         self.get_quiz_session_by_id(&session_id, user_id).await
+    }
+
+    /// Buat sesi random: ambil soal acak yang bisa diakses user, simpan question_ids di session.
+    pub async fn create_random_session(
+        &self,
+        user_id: &str,
+        request: &StartRandomSessionRequest,
+    ) -> Result<StartRandomSessionResponse, Error> {
+        let count = request.count as usize;
+        let kategori = request.category.as_deref().unwrap_or("Semua Kategori");
+        let total_time = (count as i32) * 60;
+
+        // Step 1: ambil semua soal ID yang bisa diakses user (memperhatikan premium access)
+        let accessible_ids: Vec<i32> = match &request.category {
+            Some(cat) => {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT DISTINCT s.id FROM soal s
+                    INNER JOIN paket_soal_items psi ON psi.soal_id = s.id
+                    INNER JOIN paket_soal p ON p.id = psi.paket_soal_id
+                    INNER JOIN kategori_soal k ON k.id = p.kategori_id
+                    LEFT JOIN premium_quiz_access pqa ON pqa.paket_soal_id = p.id
+                    WHERE (
+                        p.is_premium = false
+                        OR EXISTS (
+                            SELECT 1 FROM user_subscriptions us
+                            WHERE us.user_id = ?
+                              AND us.status = 'active'
+                              AND (us.end_date IS NULL OR us.end_date > NOW())
+                              AND us.plan_id >= pqa.min_plan_id
+                        )
+                    )
+                    AND k.nama_kategori = ?
+                    "#,
+                )
+                .bind(user_id)
+                .bind(cat)
+                .fetch_all(&*self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_scalar(
+                    r#"
+                    SELECT DISTINCT s.id FROM soal s
+                    INNER JOIN paket_soal_items psi ON psi.soal_id = s.id
+                    INNER JOIN paket_soal p ON p.id = psi.paket_soal_id
+                    LEFT JOIN premium_quiz_access pqa ON pqa.paket_soal_id = p.id
+                    WHERE (
+                        p.is_premium = false
+                        OR EXISTS (
+                            SELECT 1 FROM user_subscriptions us
+                            WHERE us.user_id = ?
+                              AND us.status = 'active'
+                              AND (us.end_date IS NULL OR us.end_date > NOW())
+                              AND us.plan_id >= pqa.min_plan_id
+                        )
+                    )
+                    "#,
+                )
+                .bind(user_id)
+                .fetch_all(&*self.pool)
+                .await?
+            }
+        };
+
+        if accessible_ids.is_empty() {
+            return Err(Error::RowNotFound);
+        }
+
+        // Step 2: Fisher-Yates shuffle via rand crate, ambil sejumlah count
+        let mut ids = accessible_ids;
+        let mut rng = rand::thread_rng();
+        ids.shuffle(&mut rng);
+        let selected_ids: Vec<i32> = ids.into_iter().take(count).collect();
+
+        // Step 3: fetch question content untuk selected_ids
+        let placeholders = selected_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let query_str = format!(
+            "SELECT id, soal, question_type, opt1, opt2, opt3, opt4, opt5, solution, modul, pelajaran, tag FROM soal WHERE id IN ({})",
+            placeholders
+        );
+        let mut q = sqlx::query(&query_str);
+        for id in &selected_ids {
+            q = q.bind(*id);
+        }
+        let rows = q.fetch_all(&*self.pool).await?;
+
+        // Build map id → soal untuk preserve shuffled order
+        let soal_map: HashMap<i32, RandomSessionSoal> = rows
+            .into_iter()
+            .map(|row| {
+                let id: i32 = row.get("id");
+                (id, RandomSessionSoal {
+                    id,
+                    soal: row.get("soal"),
+                    question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
+                    opt1: row.get("opt1"),
+                    opt2: row.get("opt2"),
+                    opt3: row.get("opt3"),
+                    opt4: row.get("opt4"),
+                    opt5: row.get("opt5"),
+                    solution: row.get("solution"),
+                    modul: row.get("modul"),
+                    pelajaran: row.get("pelajaran"),
+                    tag: row.get("tag"),
+                })
+            })
+            .collect();
+
+        // Susun kembali sesuai urutan shuffle
+        let questions: Vec<RandomSessionSoal> = selected_ids
+            .iter()
+            .filter_map(|id| soal_map.get(id).cloned())
+            .collect();
+
+        let actual_count = questions.len();
+        let question_ids_json = serde_json::to_string(&selected_ids).unwrap_or_else(|_| "[]".to_string());
+
+        // Step 4: simpan session ke DB
+        let session_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        sqlx::query(
+            r#"
+            INSERT INTO quiz_sessions (
+                id, user_id, paket_soal_id, kategori_soal, nama_paket_soal,
+                session_type, question_ids,
+                total_time, current_question, is_completed, score,
+                correct_answers, incorrect_answers, created_at, updated_at
+            )
+            VALUES (?, ?, NULL, ?, 'Latihan Random', 'random', ?, ?, 0, FALSE, 0, 0, 0, ?, ?)
+            "#,
+        )
+        .bind(&session_id)
+        .bind(user_id)
+        .bind(kategori)
+        .bind(&question_ids_json)
+        .bind(total_time)
+        .bind(now)
+        .bind(now)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(StartRandomSessionResponse {
+            session_id,
+            session_type: "random".to_string(),
+            nama_paket_soal: "Latihan Random".to_string(),
+            kategori_soal: kategori.to_string(),
+            total_time,
+            total_questions: actual_count,
+            questions,
+        })
     }
 
     pub async fn get_quiz_session_by_id(
@@ -45,7 +200,7 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<QuizSession, Error> {
         sqlx::query_as::<_, QuizSession>(
             r#"
-            SELECT * FROM quiz_sessions 
+            SELECT * FROM quiz_sessions
             WHERE id = ? AND user_id = ?
             "#,
         )
@@ -62,7 +217,7 @@ impl<'c> Table<'c, QuizSession> {
         request: &UpdateQuizSessionRequest,
     ) -> Result<QuizSession, Error> {
         let now = Utc::now();
-        
+
         // Build the update query dynamically based on provided fields
         let mut query = "UPDATE quiz_sessions SET updated_at = ?".to_string();
         let mut params: Vec<Box<dyn sqlx::Encode<'_, sqlx::MySql> + Send + 'static>> = vec![
@@ -92,12 +247,12 @@ impl<'c> Table<'c, QuizSession> {
         }
 
         query.push_str(" WHERE id = ? AND user_id = ? AND is_completed = FALSE");
-        
+
         let mut sql_query = sqlx::query(&query);
-        
+
         // Add all parameters
         sql_query = sql_query.bind(now);
-        
+
         if let Some(current_question) = request.current_question {
             sql_query = sql_query.bind(current_question);
         }
@@ -117,9 +272,9 @@ impl<'c> Table<'c, QuizSession> {
         }
 
         sql_query = sql_query.bind(session_id).bind(user_id);
-        
+
         sql_query.execute(&*self.pool).await?;
-        
+
         self.get_quiz_session_by_id(session_id, user_id).await
     }
 
@@ -131,21 +286,28 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<QuizSession, Error> {
         let now = Utc::now();
         let answers_json = serde_json::to_string(&request.answers).unwrap_or_default();
-        
-        // Get the quiz session to retrieve paket info for scoring
+
         let session = self.get_quiz_session_by_id(session_id, user_id).await?;
-        
-        // Calculate score based on actual correct answers
-        let (correct_answers, incorrect_answers, score) = self.calculate_score(
-            &session.kategori_soal, 
-            &session.nama_paket_soal,
-            &request.answers
-        ).await?;
-        
+
+        // Branch: random session gunakan question_ids, standard gunakan kategori+paket
+        let (correct_answers, incorrect_answers, score) = if session.session_type == "random" {
+            let question_ids: Vec<i32> = session.question_ids
+                .as_ref()
+                .and_then(|json| serde_json::from_str(json).ok())
+                .unwrap_or_default();
+            self.calculate_score_by_ids(&question_ids, &request.answers).await?
+        } else {
+            self.calculate_score(
+                &session.kategori_soal,
+                &session.nama_paket_soal,
+                &request.answers,
+            ).await?
+        };
+
         sqlx::query(
             r#"
-            UPDATE quiz_sessions 
-            SET answers = ?, time_remaining = ?, is_completed = TRUE, 
+            UPDATE quiz_sessions
+            SET answers = ?, time_remaining = ?, is_completed = TRUE,
                 score = ?, correct_answers = ?, incorrect_answers = ?, updated_at = ?
             WHERE id = ? AND user_id = ? AND is_completed = FALSE
             "#,
@@ -160,7 +322,7 @@ impl<'c> Table<'c, QuizSession> {
         .bind(user_id)
         .execute(&*self.pool)
         .await?;
-        
+
         self.get_quiz_session_by_id(session_id, user_id).await
     }
 
@@ -170,7 +332,7 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<Vec<QuizSession>, Error> {
         sqlx::query_as::<_, QuizSession>(
             r#"
-            SELECT * FROM quiz_sessions 
+            SELECT * FROM quiz_sessions
             WHERE user_id = ? AND is_completed = FALSE
             ORDER BY created_at DESC
             "#,
@@ -188,7 +350,7 @@ impl<'c> Table<'c, QuizSession> {
         let limit_clause = limit.map(|l| format!(" LIMIT {}", l)).unwrap_or_default();
         let query = format!(
             r#"
-            SELECT * FROM quiz_sessions 
+            SELECT * FROM quiz_sessions
             WHERE user_id = ? AND is_completed = TRUE
             ORDER BY created_at DESC
             {}
@@ -209,7 +371,7 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<(), Error> {
         sqlx::query(
             r#"
-            DELETE FROM quiz_sessions 
+            DELETE FROM quiz_sessions
             WHERE id = ? AND user_id = ?
             "#,
         )
@@ -223,8 +385,8 @@ impl<'c> Table<'c, QuizSession> {
     pub async fn cleanup_expired_sessions(&self, hours: i32) -> Result<(), Error> {
         sqlx::query(
             r#"
-            DELETE FROM quiz_sessions 
-            WHERE is_completed = FALSE 
+            DELETE FROM quiz_sessions
+            WHERE is_completed = FALSE
             AND updated_at < DATE_SUB(NOW(), INTERVAL ? HOUR)
             "#,
         )
@@ -243,8 +405,8 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<Option<QuizSession>, Error> {
         let result = sqlx::query_as::<_, QuizSession>(
             r#"
-            SELECT * FROM quiz_sessions 
-            WHERE user_id = ? AND paket_soal_id = ? 
+            SELECT * FROM quiz_sessions
+            WHERE user_id = ? AND paket_soal_id = ?
             AND kategori_soal = ? AND nama_paket_soal = ?
             AND is_completed = FALSE
             ORDER BY created_at DESC
@@ -336,7 +498,6 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<QuizHistoryResponse, Error> {
         let offset = (page - 1) * limit;
 
-        // Get total count
         let total: i64 = sqlx::query_scalar(
             r#"
             SELECT COUNT(*) FROM quiz_sessions
@@ -347,12 +508,16 @@ impl<'c> Table<'c, QuizSession> {
         .fetch_one(&*self.pool)
         .await?;
 
-        // Get paginated rows — total_questions from paket_soal_items (not correct+incorrect)
+        // total_questions: untuk standard pakai paket_soal_items, untuk random pakai JSON_LENGTH
         let rows = sqlx::query(
             r#"
-            SELECT qs.id, qs.nama_paket_soal, qs.kategori_soal, qs.score,
+            SELECT qs.id, qs.nama_paket_soal, qs.kategori_soal, qs.session_type, qs.score,
                    qs.correct_answers, qs.incorrect_answers,
-                   (SELECT COUNT(*) FROM paket_soal_items psi WHERE psi.paket_soal_id = qs.paket_soal_id) AS total_questions,
+                   COALESCE(
+                       (SELECT COUNT(*) FROM paket_soal_items psi WHERE psi.paket_soal_id = qs.paket_soal_id),
+                       JSON_LENGTH(qs.question_ids),
+                       0
+                   ) AS total_questions,
                    (qs.total_time - COALESCE(qs.time_remaining, 0)) AS duration_seconds,
                    qs.updated_at
             FROM quiz_sessions qs
@@ -378,6 +543,7 @@ impl<'c> Table<'c, QuizSession> {
                     id: row.get("id"),
                     package_name: row.get("nama_paket_soal"),
                     category: row.get("kategori_soal"),
+                    session_type: row.try_get("session_type").unwrap_or_else(|_| "standard".to_string()),
                     score: row.get("score"),
                     correct,
                     wrong,
@@ -392,20 +558,85 @@ impl<'c> Table<'c, QuizSession> {
         Ok(QuizHistoryResponse { data, total, page, limit })
     }
 
+    /// Hitung skor berdasarkan question_ids eksplisit (untuk random session).
+    async fn calculate_score_by_ids(
+        &self,
+        question_ids: &[i32],
+        user_answers: &[Option<i32>],
+    ) -> Result<(i32, i32, i32), Error> {
+        if question_ids.is_empty() {
+            return Ok((0, 0, 0));
+        }
+
+        let placeholders = question_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let query_str = format!(
+            "SELECT id, correct_answer FROM soal WHERE id IN ({})",
+            placeholders
+        );
+        let mut q = sqlx::query(&query_str);
+        for id in question_ids {
+            q = q.bind(*id);
+        }
+        let rows = q.fetch_all(&*self.pool).await?;
+
+        // Build map id → correct_answer
+        let correct_map: HashMap<i32, String> = rows
+            .into_iter()
+            .filter_map(|row| {
+                let id: i32 = row.get("id");
+                let ca: Option<String> = row.get("correct_answer");
+                ca.map(|c| (id, c))
+            })
+            .collect();
+
+        let mut correct_count = 0i32;
+        let mut incorrect_count = 0i32;
+
+        // Iterate question_ids in shuffled order — matches user_answers index
+        for (index, qid) in question_ids.iter().enumerate() {
+            if let Some(user_answer) = user_answers.get(index).and_then(|a| *a) {
+                if let Some(correct_answer) = correct_map.get(qid) {
+                    let correct_index = match correct_answer.as_str() {
+                        "opt1" => 0,
+                        "opt2" => 1,
+                        "opt3" => 2,
+                        "opt4" => 3,
+                        "opt5" => 4,
+                        _ => 999,
+                    };
+                    if user_answer == correct_index {
+                        correct_count += 1;
+                    } else {
+                        incorrect_count += 1;
+                    }
+                }
+            }
+            // None = tidak dijawab, tidak dihitung salah
+        }
+
+        let total = question_ids.len() as i32;
+        let score = if total > 0 {
+            (correct_count as f32 / total as f32 * 100.0).round() as i32
+        } else {
+            0
+        };
+
+        Ok((correct_count, incorrect_count, score))
+    }
+
     async fn calculate_score(
         &self,
         kategori_soal: &str,
         nama_paket_soal: &str,
         user_answers: &[Option<i32>],
     ) -> Result<(i32, i32, i32), Error> {
-        // Fetch the correct answers from the database using the same query as get_paket_soal_response
         let paket_response = sqlx::query(
             r#"
             SELECT s.correct_answer
-            FROM kategori_soal ks 
-            JOIN paket_soal ps ON ks.id = ps.kategori_id 
-            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
-            JOIN soal s ON psi.soal_id = s.id 
+            FROM kategori_soal ks
+            JOIN paket_soal ps ON ks.id = ps.kategori_id
+            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id
+            JOIN soal s ON psi.soal_id = s.id
             WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ?
             ORDER BY psi.id
             "#,
@@ -421,19 +652,15 @@ impl<'c> Table<'c, QuizSession> {
         for (index, row) in paket_response.iter().enumerate() {
             if let Some(user_answer) = user_answers.get(index) {
                 if let Some(user_answer) = user_answer {
-                    // Note: 0 is a valid answer (first option), not "no answer"
-                    // No need to skip 0 as it represents the first option
-                    // Get correct answer from database (opt1, opt2, opt3, opt4, opt5)
                     let correct_answer: String = row.get("correct_answer");
-                    
-                    // Convert correct answer to index (opt1=0, opt2=1, etc. - 0-based indexing)
+
                     let correct_index = match correct_answer.as_str() {
                         "opt1" => 0,
-                        "opt2" => 1, 
+                        "opt2" => 1,
                         "opt3" => 2,
                         "opt4" => 3,
                         "opt5" => 4,
-                        _ => 999, // Invalid answer (use 999 so it never matches valid user answers)
+                        _ => 999,
                     };
 
                     if *user_answer == correct_index {
@@ -442,11 +669,9 @@ impl<'c> Table<'c, QuizSession> {
                         incorrect_count += 1;
                     }
                 }
-                // else: user_answer is None — question was left unanswered, not counted as wrong
             }
         }
 
-        // Calculate percentage score
         let total_questions = paket_response.len() as i32;
         let score = if total_questions > 0 {
             (correct_count as f32 / total_questions as f32 * 100.0).round() as i32
