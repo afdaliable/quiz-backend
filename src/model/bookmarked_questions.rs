@@ -1,60 +1,83 @@
-use chrono::NaiveDateTime;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
 
-/// Response when bookmarking/unbookmarking a question
+/// Response untuk POST bookmark
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BookmarkResponse {
-    /// Whether the operation was successful
     pub success: bool,
-    /// Message describing the result
     pub message: String,
-    /// Total number of bookmarks for this user
     pub bookmark_count: i32,
 }
 
-/// Request payload for bookmarking a question
+/// Response untuk DELETE bookmark (single)
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct DeleteBookmarkResponse {
+    pub success: bool,
+    pub deleted_question_id: i32,
+    pub bookmark_count: i32,
+}
+
+/// Response untuk DELETE bookmark (bulk)
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BulkDeleteResponse {
+    pub success: bool,
+    pub deleted_count: u64,
+    pub bookmark_count: i32,
+}
+
+/// Request body untuk bulk delete
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BulkDeleteRequest {
+    pub question_ids: Vec<i32>,
+}
+
+/// Request payload untuk bookmark
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BookmarkRequest {
-    /// ID of the question to bookmark
     pub question_id: i32,
 }
 
-/// Bookmarked question details
+/// Count per kategori untuk badge filter
+#[derive(Debug, Serialize, Deserialize, ToSchema, sqlx::FromRow)]
+pub struct CategoryCount {
+    pub category: String,
+    pub count: i64,
+}
+
+/// Response list bookmark dengan pagination & kategori
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct BookmarkListResponse {
+    pub bookmarks: Vec<BookmarkedQuestion>,
+    pub total: i64,
+    pub page: u32,
+    pub limit: u32,
+    pub total_pages: u32,
+    pub categories: Vec<CategoryCount>,
+}
+
+/// Detail soal yang di-bookmark
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct BookmarkedQuestion {
-    /// Bookmark ID
     pub id: String,
-    /// Question ID
     pub question_id: i32,
-    /// Question text
     pub soal: String,
-    /// Option 1
     pub opt1: Option<String>,
-    /// Option 2
     pub opt2: Option<String>,
-    /// Option 3
     pub opt3: Option<String>,
-    /// Option 4
     pub opt4: Option<String>,
-    /// Option 5
     pub opt5: Option<String>,
-    /// Correct answer
     pub correct_answer: Option<String>,
-    /// Explanation/solution
     pub solution: Option<String>,
-    /// Module
     pub modul: Option<String>,
-    /// Subject (pelajaran)
     pub pelajaran: Option<String>,
-    /// Tag
     pub tag: Option<String>,
-    /// Question type
     pub question_type: Option<String>,
-    /// Created at timestamp
-    pub created_at: NaiveDateTime,
+    pub bookmarked_at: Option<DateTime<Utc>>,
+    pub quiz_name: String,
+    pub question_number: i64,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
@@ -74,7 +97,9 @@ impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
             question_type: row.try_get("question_type").ok(),
-            created_at: row.try_get("created_at").unwrap_or_else(|_| NaiveDateTime::from_timestamp_opt(0, 0).unwrap()),
+            bookmarked_at: row.try_get("bookmarked_at").ok(),
+            quiz_name: row.try_get("quiz_name").unwrap_or_default(),
+            question_number: row.try_get("question_number").unwrap_or(0),
         })
     }
 }
