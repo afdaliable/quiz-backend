@@ -20,7 +20,7 @@ struct CountResult {
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/api/bookmarks")
+        web::scope("/bookmarks")
             .route("/{question_id}", web::post().to(bookmark_question))
             .route("/{question_id}", web::delete().to(unbookmark_question))
             .route("", web::get().to(get_user_bookmarks))
@@ -70,7 +70,7 @@ pub async fn bookmark_question(
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(result) => result.map_or(0, |r| r.count) > 0,
+        Ok(result) => result.count > 0,
         Err(_) => false,
     };
 
@@ -92,7 +92,7 @@ pub async fn bookmark_question(
     .fetch_one(&*data.context.soal.pool)
     .await
     {
-        Ok(result) => result.map_or(0, |r| r.count) > 0,
+        Ok(result) => result.count > 0,
         Err(_) => false,
     };
 
@@ -121,7 +121,7 @@ pub async fn bookmark_question(
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(result) => result.map_or(0, |r| r.count as i32),
+                Ok(result) => result.count as i32,
                 Err(_) => 0,
             };
 
@@ -200,7 +200,7 @@ pub async fn unbookmark_question(
             .fetch_one(&*data.context.soal.pool)
             .await
             {
-                Ok(result) => result.map_or(0, |r| r.count as i32),
+                Ok(result) => result.count as i32,
                 Err(_) => 0,
             };
 

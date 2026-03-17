@@ -1,3 +1,4 @@
+use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use sqlx::mysql::MySqlRow;
@@ -53,7 +54,7 @@ pub struct BookmarkedQuestion {
     /// Question type
     pub question_type: Option<String>,
     /// Created at timestamp
-    pub created_at: String,
+    pub created_at: NaiveDateTime,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
@@ -73,7 +74,7 @@ impl<'c> FromRow<'c, MySqlRow> for BookmarkedQuestion {
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
             question_type: row.try_get("question_type").ok(),
-            created_at: row.get("created_at"),
+            created_at: row.try_get("created_at").unwrap_or_else(|_| NaiveDateTime::from_timestamp_opt(0, 0).unwrap()),
         })
     }
 }
