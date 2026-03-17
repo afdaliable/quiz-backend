@@ -48,6 +48,7 @@ pub struct Config {
     google_oauth: GoogleOAuthConfig,
     payment: PaymentConfig,
     redis: RedisConfig,
+    internal_api_key: Option<String>,
 }
 
 impl Config {
@@ -129,5 +130,9 @@ impl Config {
 
     pub fn get_redis_password(&self) -> &str {
         &self.redis.password
+    }
+
+    pub fn get_internal_api_key(&self) -> Option<&str> {
+        self.internal_api_key.as_deref()
     }
 }

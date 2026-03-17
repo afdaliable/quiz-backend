@@ -50,12 +50,12 @@ async fn bulk_import_internal(
     }
 
     // 2. API key check
-    let expected_key = match std::env::var("INTERNAL_API_KEY") {
-        Ok(key) if !key.is_empty() => key,
+    let expected_key = match data.config.get_internal_api_key() {
+        Some(key) if !key.is_empty() => key,
         _ => {
-            eprintln!("INTERNAL_API_KEY env var is not set or empty");
+            eprintln!("internal_api_key is not set in config.json");
             return HttpResponse::InternalServerError().json(serde_json::json!({
-                "error": "Server misconfiguration: INTERNAL_API_KEY not set"
+                "error": "Server misconfiguration: internal_api_key not configured"
             }));
         }
     };
@@ -65,7 +65,7 @@ async fn bulk_import_internal(
         .get("X-Internal-Api-Key")
         .and_then(|v| v.to_str().ok());
 
-    if provided_key != Some(expected_key.as_str()) {
+    if provided_key != Some(expected_key) {
         return HttpResponse::Unauthorized().json(serde_json::json!({
             "error": "Unauthorized: missing or invalid X-Internal-Api-Key"
         }));
