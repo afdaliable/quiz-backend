@@ -7,11 +7,13 @@ use chrono::{DateTime, Utc};
 pub struct QuizSession {
     pub id: String,
     pub user_id: String,
-    pub paket_soal_id: i32,
+    pub paket_soal_id: Option<i32>,       // NULL untuk random session
     pub kategori_soal: String,
     pub nama_paket_soal: String,
+    pub session_type: String,             // "standard" | "random"
+    pub question_ids: Option<String>,     // JSON Vec<i32>, diisi untuk random session
     pub current_question: i32,
-    pub answers: Option<String>, // JSON string of Vec<Option<i32>>
+    pub answers: Option<String>,          // JSON string of Vec<Option<i32>>
     pub marked_questions: Option<String>, // JSON string of Vec<bool>
     pub time_remaining: Option<i32>,
     pub total_time: Option<i32>,
@@ -28,9 +30,11 @@ impl<'c> FromRow<'c, MySqlRow> for QuizSession {
         Ok(QuizSession {
             id: row.get("id"),
             user_id: row.get("user_id"),
-            paket_soal_id: row.get("paket_soal_id"),
+            paket_soal_id: row.try_get("paket_soal_id").ok(),
             kategori_soal: row.get("kategori_soal"),
             nama_paket_soal: row.get("nama_paket_soal"),
+            session_type: row.try_get("session_type").unwrap_or_else(|_| "standard".to_string()),
+            question_ids: row.try_get("question_ids").ok(),
             current_question: row.get("current_question"),
             answers: row.get("answers"),
             marked_questions: row.get("marked_questions"),
@@ -55,6 +59,12 @@ pub struct CreateQuizSessionRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct StartRandomSessionRequest {
+    pub count: u32,               // hanya 10 | 20 | 30
+    pub category: Option<String>, // filter by kategori_soal, None = semua
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateQuizSessionRequest {
     pub current_question: Option<i32>,
     pub answers: Option<Vec<Option<i32>>>,
@@ -68,13 +78,43 @@ pub struct CompleteQuizSessionRequest {
     pub time_remaining: i32,
 }
 
+/// Soal yang dikembalikan ke client untuk sesi random — tanpa correct_answer
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct RandomSessionSoal {
+    pub id: i32,
+    pub soal: String,
+    pub question_type: String,
+    pub opt1: Option<String>,
+    pub opt2: Option<String>,
+    pub opt3: Option<String>,
+    pub opt4: Option<String>,
+    pub opt5: Option<String>,
+    pub solution: Option<String>,
+    pub modul: Option<String>,
+    pub pelajaran: Option<String>,
+    pub tag: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct StartRandomSessionResponse {
+    pub session_id: String,
+    pub session_type: String,
+    pub nama_paket_soal: String,
+    pub kategori_soal: String,
+    pub total_time: i32,
+    pub total_questions: usize,
+    pub questions: Vec<RandomSessionSoal>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QuizSessionResponse {
     pub id: String,
     pub user_id: String,
-    pub paket_soal_id: i32,
+    pub paket_soal_id: Option<i32>,
     pub kategori_soal: String,
     pub nama_paket_soal: String,
+    pub session_type: String,
+    pub question_ids: Option<Vec<i32>>,
     pub current_question: i32,
     pub answers: Vec<Option<i32>>,
     pub marked_questions: Vec<bool>,
@@ -110,6 +150,7 @@ pub struct QuizHistoryEntry {
     pub id: String,
     pub package_name: String,
     pub category: String,
+    pub session_type: String,
     pub score: i32,
     pub correct: i32,
     pub wrong: i32,
@@ -145,12 +186,18 @@ impl From<QuizSession> for QuizSessionResponse {
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
 
+        let question_ids: Option<Vec<i32>> = session.question_ids
+            .as_ref()
+            .and_then(|json| serde_json::from_str(json).ok());
+
         QuizSessionResponse {
             id: session.id,
             user_id: session.user_id,
             paket_soal_id: session.paket_soal_id,
             kategori_soal: session.kategori_soal,
             nama_paket_soal: session.nama_paket_soal,
+            session_type: session.session_type,
+            question_ids,
             current_question: session.current_question,
             answers,
             marked_questions,
