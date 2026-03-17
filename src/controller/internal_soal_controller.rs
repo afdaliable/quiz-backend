@@ -22,7 +22,7 @@ fn is_internal_ip(ip: IpAddr) -> bool {
 
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
-        web::scope("/admin/soal")
+        web::scope("/internal")
             .service(bulk_import_internal)
     );
 }
@@ -32,13 +32,13 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 /// Accepts a JSON array of questions directly (not wrapped in an object).
 /// Security: requires `X-Internal-Api-Key` header matching `INTERNAL_API_KEY` env var,
 /// and the request must originate from a loopback, RFC-1918, or Tailscale IP.
-#[post("/bulk-import-internal")]
+#[post("/soal/bulk-import")]
 async fn bulk_import_internal(
     req: HttpRequest,
     questions: web::Json<Vec<CreateSoalRequest>>,
     data: web::Data<AppState<'_>>,
 ) -> HttpResponse {
-    log_request("POST /admin/soal/bulk-import-internal", &data.connections);
+    log_request("POST /internal/soal/bulk-import", &data.connections);
 
     // 1. IP check
     let peer_ip = req.peer_addr().map(|a| a.ip());
