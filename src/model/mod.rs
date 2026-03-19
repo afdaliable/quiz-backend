@@ -20,6 +20,7 @@ pub mod premium_quiz_access;
 pub mod payment_transaction;
 pub mod license_code;
 pub mod bookmarked_questions;
+pub mod question_comment;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
