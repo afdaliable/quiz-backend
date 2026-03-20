@@ -2,7 +2,7 @@ use super::Table;
 use crate::model::User;
 use crate::model::users::{UserProfileResponse, UserLearningStatsResponse};
 use sqlx::{Error, Row};
-use chrono::Utc;
+use chrono::{NaiveDate, Utc};
 
 impl<'c> Table<'c, User> {
     pub async fn create_user(&self, user: &User) -> Result<(), Error> {
@@ -203,7 +203,37 @@ impl<'c> Table<'c, User> {
             joined_at: user.created_at,
             account_status,
             premium_expires_at,
+            onboarding_completed: user.onboarding_completed,
         }))
+    }
+
+    pub async fn save_onboarding_data(
+        &self,
+        user_id: &str,
+        goals_json: &str,
+        timeframe: Option<&str>,
+        exam_date: Option<NaiveDate>,
+        completed: bool,
+    ) -> Result<(), Error> {
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET onboarding_completed = ?,
+                onboarding_goals     = ?,
+                exam_timeframe       = ?,
+                target_exam_date     = ?,
+                updated_at           = NOW()
+            WHERE id = ? AND deleted_at IS NULL
+            "#,
+        )
+        .bind(completed)
+        .bind(goals_json)
+        .bind(timeframe)
+        .bind(exam_date)
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
     }
 
     pub async fn get_user_learning_stats(&self, user_id: &str) -> Result<UserLearningStatsResponse, Error> {

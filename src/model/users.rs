@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -17,6 +17,10 @@ pub struct User {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub onboarding_completed: bool,
+    pub onboarding_goals: Option<String>,
+    pub exam_timeframe: Option<String>,
+    pub target_exam_date: Option<NaiveDate>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for User {
@@ -33,6 +37,10 @@ impl<'c> FromRow<'c, MySqlRow> for User {
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             deleted_at: row.get("deleted_at"),
+            onboarding_completed: row.try_get("onboarding_completed").unwrap_or(false),
+            onboarding_goals: row.try_get("onboarding_goals").unwrap_or(None),
+            exam_timeframe: row.try_get("exam_timeframe").unwrap_or(None),
+            target_exam_date: row.try_get("target_exam_date").unwrap_or(None),
         })
     }
 }
@@ -169,6 +177,20 @@ pub struct UserProfileResponse {
     pub joined_at: DateTime<Utc>,
     pub account_status: String, // "Free" | "Premium"
     pub premium_expires_at: Option<DateTime<Utc>>,
+    pub onboarding_completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OnboardingRequest {
+    pub goals: Vec<String>,
+    pub timeframe: Option<String>,
+    pub exam_date: Option<NaiveDate>,
+    pub onboarding_completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OnboardingResponse {
+    pub success: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
