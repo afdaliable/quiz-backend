@@ -107,6 +107,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_admin_paket_soal_items_controller)
             .configure(controller::init_admin_analytics_controller)
             .configure(controller::init_internal_soal_controller)
+            .configure(controller::init_question_comment_controller)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

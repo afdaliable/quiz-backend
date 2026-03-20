@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 19] = [
+const PUBLIC_ROUTES: [&str; 20] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -115,6 +115,7 @@ const PUBLIC_ROUTES: [&str; 19] = [
     "/api/admin", // API-prefixed version
     "/internal",     // Internal routes secured by IP whitelist + API key
     "/api/internal", // API-prefixed version
+    "/questions",    // Comment GET endpoints allow anonymous read
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
