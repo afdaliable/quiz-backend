@@ -21,6 +21,16 @@ struct GoogleOAuthConfig {
     redirect_uri: String,
 }
 
+#[derive(Deserialize, Clone, Default)]
+struct MidtransConfig {
+    #[serde(default)]
+    server_key: String,
+    #[serde(default)]
+    client_key: String,
+    #[serde(default)]
+    is_production: bool,
+}
+
 #[derive(Deserialize, Clone)]
 struct PaymentConfig {
     mayar_api_key: String,
@@ -49,6 +59,8 @@ pub struct Config {
     payment: PaymentConfig,
     redis: RedisConfig,
     internal_api_key: Option<String>,
+    #[serde(default)]
+    midtrans: MidtransConfig,
 }
 
 impl Config {
@@ -134,5 +146,17 @@ impl Config {
 
     pub fn get_internal_api_key(&self) -> Option<&str> {
         self.internal_api_key.as_deref()
+    }
+
+    pub fn get_midtrans_server_key(&self) -> &str {
+        &self.midtrans.server_key
+    }
+
+    pub fn get_midtrans_client_key(&self) -> &str {
+        &self.midtrans.client_key
+    }
+
+    pub fn get_midtrans_is_production(&self) -> bool {
+        self.midtrans.is_production
     }
 }
