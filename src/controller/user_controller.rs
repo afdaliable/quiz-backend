@@ -1,5 +1,5 @@
 use crate::controller::log_request;
-use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse, OnboardingRequest, OnboardingResponse};
+use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse, OnboardingRequest, OnboardingResponse, RecommendationsResponse};
 use crate::model::{QuizHistoryQuery};
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest};
@@ -21,6 +21,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route("/profile", web::get().to(get_user_profile))
             .route("/stats", web::get().to(get_user_stats))
             .route("/onboarding", web::patch().to(update_onboarding))
+            .route("/recommendations", web::get().to(get_recommendations))
     );
 }
 
@@ -207,6 +208,69 @@ async fn update_onboarding(
         Ok(_) => HttpResponse::Ok().json(OnboardingResponse { success: true }),
         Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
             error: format!("Failed to save onboarding data: {}", e),
+        }),
+    }
+}
+
+/// Get paket soal recommendations based on user's onboarding goals
+async fn get_recommendations(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("/user/recommendations", &data.connections);
+
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    // Fetch user to read stored onboarding goals
+    let user = match data.context.users.get_user_by_id(&user_id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return HttpResponse::NotFound().json(ErrorResponse {
+            error: "User not found".to_string(),
+        }),
+        Err(e) => return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to fetch user: {}", e),
+        }),
+    };
+
+    // Parse goals JSON string → Vec<String>
+    let goals: Vec<String> = user.onboarding_goals
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    // Map goals → kategori_soal names (in-process, no DB round-trip)
+    let categories: Vec<&str> = goals.iter()
+        .filter_map(|g| match g.as_str() {
+            "cpns"                  => Some("CPNS"),
+            "pppk"                  => Some("PPPK"),
+            "snbt" | "masuk_ptn"    => Some("UTBK"),
+            "beasiswa"              => Some("BEASISWA"),
+            "kedinasan"             => Some("KEDINASAN"),
+            "upkp"                  => Some("UPKP"),
+            _                       => None, // ppg, nakes, bumn → fallback
+        })
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    // Goals that had a valid mapping (for the response field)
+    let matched_goals: Vec<String> = goals.iter()
+        .filter(|g| matches!(g.as_str(), "cpns" | "pppk" | "snbt" | "masuk_ptn" | "beasiswa" | "kedinasan" | "upkp"))
+        .cloned()
+        .collect();
+
+    match data.context.paket_soal_response.get_recommended_packages(&categories).await {
+        Ok(packages) => HttpResponse::Ok().json(RecommendationsResponse {
+            data: packages,
+            based_on_goals: matched_goals,
+        }),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to fetch recommendations: {}", e),
         }),
     }
 }
