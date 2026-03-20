@@ -1,9 +1,10 @@
 use crate::controller::log_request;
-use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse};
+use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse, OnboardingRequest, OnboardingResponse};
 use crate::model::{QuizHistoryQuery};
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use utoipa::ToSchema;
 
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -19,6 +20,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route("/quiz-history", web::get().to(get_quiz_history))
             .route("/profile", web::get().to(get_user_profile))
             .route("/stats", web::get().to(get_user_stats))
+            .route("/onboarding", web::patch().to(update_onboarding))
     );
 }
 
@@ -169,6 +171,42 @@ async fn get_user_profile(
         }),
         Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
             error: format!("Failed to get user profile: {}", e),
+        }),
+    }
+}
+
+/// Save onboarding data for the authenticated user
+async fn update_onboarding(
+    req: web::Json<OnboardingRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("/user/onboarding", &data.connections);
+
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    let goals_json = match serde_json::to_string(&req.goals) {
+        Ok(s) => s,
+        Err(e) => return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to serialize goals: {}", e),
+        }),
+    };
+
+    match data.context.users.save_onboarding_data(
+        &user_id,
+        &goals_json,
+        req.timeframe.as_deref(),
+        req.exam_date,
+        req.onboarding_completed,
+    ).await {
+        Ok(_) => HttpResponse::Ok().json(OnboardingResponse { success: true }),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to save onboarding data: {}", e),
         }),
     }
 }
