@@ -13,6 +13,7 @@ use crate::model::User;
 use crate::model::ListPaketSoalLengkap;
 use crate::model::Session;
 use crate::model::QuizSession;
+use crate::model::users::RecommendedPackage;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -206,6 +207,52 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
         }
 
         Ok(grouped_responses.into_values().collect())
+    }
+
+    /// Returns paket soal relevant to the given kategori names.
+    /// Pass an empty slice to get the global top-5 fallback.
+    pub async fn get_recommended_packages(
+        &self,
+        categories: &[&str],
+    ) -> Result<Vec<RecommendedPackage>, sqlx::Error> {
+        let base_select = r#"
+            SELECT
+                ps.id        AS id,
+                ps.nama_paket_soal AS name,
+                ks.nama_kategori   AS category,
+                COUNT(psi.soal_id) AS question_count,
+                COALESCE(hp.is_free, FALSE) AS is_free,
+                ps.is_premium      AS is_premium
+            FROM paket_soal ps
+            JOIN kategori_soal ks ON ps.kategori_id = ks.id
+            LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
+            LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
+        "#;
+
+        if categories.is_empty() {
+            // Fallback: top-5 free packages across all categories
+            let query_str = format!(
+                "{} GROUP BY ps.id, ps.nama_paket_soal, ks.nama_kategori, hp.is_free, ps.is_premium \
+                 ORDER BY is_free DESC, question_count DESC LIMIT 5",
+                base_select
+            );
+            return sqlx::query_as::<_, RecommendedPackage>(&query_str)
+                .fetch_all(&*self.pool)
+                .await;
+        }
+
+        let placeholders = categories.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        let query_str = format!(
+            "{} WHERE ks.nama_kategori IN ({}) \
+             GROUP BY ps.id, ps.nama_paket_soal, ks.nama_kategori, hp.is_free, ps.is_premium \
+             ORDER BY is_free DESC, question_count DESC LIMIT 5",
+            base_select, placeholders
+        );
+        let mut q = sqlx::query_as::<_, RecommendedPackage>(&query_str);
+        for cat in categories {
+            q = q.bind(*cat);
+        }
+        q.fetch_all(&*self.pool).await
     }
 }
 

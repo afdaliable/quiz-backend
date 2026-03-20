@@ -194,6 +194,35 @@ pub struct OnboardingResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RecommendedPackage {
+    pub id: i32,
+    pub name: String,
+    pub category: String,
+    pub question_count: i64,
+    pub is_free: bool,
+    pub is_premium: bool,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for RecommendedPackage {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(RecommendedPackage {
+            id: row.get("id"),
+            name: row.get("name"),
+            category: row.get("category"),
+            question_count: row.get("question_count"),
+            is_free: row.get("is_free"),
+            is_premium: row.get("is_premium"),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RecommendationsResponse {
+    pub data: Vec<RecommendedPackage>,
+    pub based_on_goals: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct UserLearningStatsResponse {
     pub total_quizzes: i64,
     pub avg_score: f64,
