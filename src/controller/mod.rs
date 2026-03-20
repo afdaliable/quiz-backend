@@ -26,6 +26,7 @@ pub mod admin_analytics_controller;
 pub mod internal_soal_controller;
 
 pub mod question_comment_controller;
+pub mod subscription_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;
@@ -50,6 +51,7 @@ pub use admin_analytics_controller::init as init_admin_analytics_controller;
 pub use internal_soal_controller::init as init_internal_soal_controller;
 
 pub use question_comment_controller::init as init_question_comment_controller;
+pub use subscription_controller::init as init_subscription_controller;
 
 fn log_request(route: &'static str, connections: &Mutex<u32>) {
     let mut con = connections.lock().unwrap();
