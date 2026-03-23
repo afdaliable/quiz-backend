@@ -200,6 +200,7 @@ impl<'c> Table<'c, User> {
             id: user.id,
             email: user.email,
             display_name: user.display_name,
+            username: user.username,
             picture_url: user.picture_url,
             joined_at: user.created_at,
             account_status,
