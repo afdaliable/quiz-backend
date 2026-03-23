@@ -1,6 +1,7 @@
 use super::Table;
 use crate::model::User;
 use crate::model::users::{UserProfileResponse, UserLearningStatsResponse};
+use crate::model::public_profile::{PublicStats, CategoryBestScore, PrivacySettings};
 use sqlx::{Error, Row};
 use chrono::{NaiveDate, Utc};
 
@@ -321,5 +322,172 @@ impl<'c> Table<'c, User> {
             total_correct,
             total_questions,
         })
+    }
+
+    pub async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, Error> {
+        sqlx::query_as::<_, User>(
+            "SELECT * FROM users WHERE username = ? AND deleted_at IS NULL"
+        )
+        .bind(username)
+        .fetch_optional(&*self.pool)
+        .await
+    }
+
+    pub async fn username_exists(&self, username: &str) -> Result<bool, Error> {
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM users WHERE username = ?"
+        )
+        .bind(username)
+        .fetch_one(&*self.pool)
+        .await?;
+        Ok(count > 0)
+    }
+
+    pub async fn update_username(&self, user_id: &str, username: &str) -> Result<(), Error> {
+        sqlx::query(
+            "UPDATE users SET username = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL"
+        )
+        .bind(username)
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn update_privacy(
+        &self,
+        user_id: &str,
+        profile_public: Option<bool>,
+        privacy_json: Option<&str>,
+    ) -> Result<(), Error> {
+        match (profile_public, privacy_json) {
+            (Some(pub_flag), Some(json)) => {
+                sqlx::query(
+                    "UPDATE users SET profile_public = ?, privacy_settings = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL"
+                )
+                .bind(pub_flag)
+                .bind(json)
+                .bind(user_id)
+                .execute(&*self.pool)
+                .await
+                .map(|_| ())
+            }
+            (Some(pub_flag), None) => {
+                sqlx::query(
+                    "UPDATE users SET profile_public = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL"
+                )
+                .bind(pub_flag)
+                .bind(user_id)
+                .execute(&*self.pool)
+                .await
+                .map(|_| ())
+            }
+            (None, Some(json)) => {
+                sqlx::query(
+                    "UPDATE users SET privacy_settings = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL"
+                )
+                .bind(json)
+                .bind(user_id)
+                .execute(&*self.pool)
+                .await
+                .map(|_| ())
+            }
+            (None, None) => Ok(()),
+        }
+    }
+
+    pub async fn get_public_stats(&self, user_id: &str) -> Result<PublicStats, Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                COUNT(*) AS total_quizzes,
+                COALESCE(AVG(score), 0) AS avg_score,
+                COALESCE(MAX(score), 0) AS best_score
+            FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            "#,
+        )
+        .bind(user_id)
+        .fetch_one(&*self.pool)
+        .await?;
+
+        let total_quizzes: i64 = row.try_get("total_quizzes")?;
+        let avg_raw: f64 = row.try_get("avg_score").unwrap_or(0.0);
+        let best_score: i64 = row.try_get("best_score").unwrap_or(0);
+
+        let avg_score = (avg_raw * 10.0).round() / 10.0;
+
+        // Favorite category
+        let fav_row = sqlx::query(
+            r#"
+            SELECT kategori_soal FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            GROUP BY kategori_soal ORDER BY COUNT(*) DESC LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        let favorite_category = fav_row.and_then(|r| r.try_get::<String, _>("kategori_soal").ok());
+
+        // Streak (reuse same logic as learning stats)
+        let today = Utc::now().date_naive();
+        let date_rows = sqlx::query(
+            r#"
+            SELECT DATE(updated_at) AS quiz_date FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            GROUP BY DATE(updated_at) ORDER BY quiz_date DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let mut streak: i64 = 0;
+        let mut expected = today;
+        for date_row in &date_rows {
+            let quiz_date: chrono::NaiveDate = date_row.try_get("quiz_date")?;
+            if quiz_date == expected {
+                streak += 1;
+                expected = match expected.pred_opt() { Some(d) => d, None => break };
+            } else {
+                break;
+            }
+        }
+
+        Ok(PublicStats { total_quizzes, avg_score, best_score, learning_streak_days: streak, favorite_category })
+    }
+
+    pub async fn get_best_scores_by_category(&self, user_id: &str) -> Result<Vec<CategoryBestScore>, Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT kategori_soal AS category, MAX(score) AS best_score, COUNT(*) AS total_attempts
+            FROM quiz_sessions
+            WHERE user_id = ? AND is_completed = TRUE
+            GROUP BY kategori_soal
+            ORDER BY best_score DESC
+            "#,
+        )
+        .bind(user_id)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(|row| CategoryBestScore {
+            category: row.get("category"),
+            best_score: row.get("best_score"),
+            total_attempts: row.get("total_attempts"),
+        }).collect())
+    }
+
+    pub async fn set_username_if_null(&self, user_id: &str, username: &str) -> Result<(), Error> {
+        sqlx::query(
+            "UPDATE users SET username = ?, updated_at = NOW() WHERE id = ? AND username IS NULL AND deleted_at IS NULL"
+        )
+        .bind(username)
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await
+        .map(|_| ())
     }
 }
