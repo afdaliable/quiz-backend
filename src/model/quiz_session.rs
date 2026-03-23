@@ -148,6 +148,7 @@ pub struct LeaderboardQuery {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QuizHistoryEntry {
     pub id: String,
+    pub paket_soal_id: Option<i32>,
     pub package_name: String,
     pub category: String,
     pub session_type: String,

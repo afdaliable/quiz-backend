@@ -22,6 +22,7 @@ pub mod license_code;
 pub mod bookmarked_questions;
 pub mod question_comment;
 pub mod midtrans;
+pub mod score_history;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
