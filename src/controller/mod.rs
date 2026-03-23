@@ -29,6 +29,8 @@ pub mod question_comment_controller;
 pub mod subscription_controller;
 pub mod public_profile_controller;
 pub mod leaderboard_controller;
+pub mod daily_challenge_controller;
+pub mod admin_daily_challenge_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;

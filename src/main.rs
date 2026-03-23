@@ -71,6 +71,20 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
+    // Background task: log daily challenge status every hour
+    let app_state_clone2 = app_state.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(3600));
+        loop {
+            interval.tick().await;
+            match app_state_clone2.context.daily_challenges.get_today().await {
+                Ok(Some(_)) => {}
+                Ok(None) => eprintln!("[daily-challenge] No challenge set for today (WIB)"),
+                Err(e) => eprintln!("[daily-challenge] Error checking today's challenge: {:?}", e),
+            }
+        }
+    });
+
     HttpServer::new(move || {
         let cors = Cors::default()
         .allow_any_origin()
@@ -111,6 +125,8 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_subscription_controller)
             .configure(quiz_backend::controller::public_profile_controller::configure_routes)
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
+            .configure(quiz_backend::controller::daily_challenge_controller::configure_routes)
+            .configure(quiz_backend::controller::admin_daily_challenge_controller::configure_routes)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

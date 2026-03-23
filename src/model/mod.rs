@@ -25,6 +25,7 @@ pub mod midtrans;
 pub mod score_history;
 pub mod public_profile;
 pub mod xp;
+pub mod daily_challenge;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
