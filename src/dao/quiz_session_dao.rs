@@ -308,7 +308,10 @@ impl<'c> Table<'c, QuizSession> {
             r#"
             UPDATE quiz_sessions
             SET answers = ?, time_remaining = ?, is_completed = TRUE,
-                score = ?, correct_answers = ?, incorrect_answers = ?, updated_at = ?
+                score = ?, correct_answers = ?, incorrect_answers = ?,
+                pomodoro_enabled = ?, pomodoro_sessions = ?,
+                pomodoro_focus_minutes = ?, pomodoro_questions_answered = ?,
+                updated_at = ?
             WHERE id = ? AND user_id = ? AND is_completed = FALSE
             "#,
         )
@@ -317,6 +320,10 @@ impl<'c> Table<'c, QuizSession> {
         .bind(score)
         .bind(correct_answers)
         .bind(incorrect_answers)
+        .bind(request.pomodoro_enabled.unwrap_or(false))
+        .bind(request.pomodoro_sessions.unwrap_or(0))
+        .bind(request.pomodoro_focus_minutes.unwrap_or(0))
+        .bind(request.pomodoro_questions_answered.unwrap_or(0))
         .bind(now)
         .bind(session_id)
         .bind(user_id)

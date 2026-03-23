@@ -2,6 +2,8 @@ use super::Table;
 use crate::model::User;
 use crate::model::users::{UserProfileResponse, UserLearningStatsResponse};
 use crate::model::public_profile::{PublicStats, CategoryBestScore, PrivacySettings};
+use crate::model::user_preferences::{UserPreferences, UpdatePreferencesRequest};
+use crate::levels::compute_level_info;
 use sqlx::{Error, Row};
 use chrono::{NaiveDate, Utc};
 
@@ -245,7 +247,9 @@ impl<'c> Table<'c, User> {
                 COUNT(*) AS total_quizzes,
                 COALESCE(SUM(score), 0) AS total_score,
                 COALESCE(SUM(correct_answers), 0) AS total_correct,
-                COALESCE(SUM(correct_answers + incorrect_answers), 0) AS total_questions
+                COALESCE(SUM(correct_answers + incorrect_answers), 0) AS total_questions,
+                COALESCE(SUM(pomodoro_sessions), 0) AS total_pomodoro_sessions,
+                COALESCE(SUM(pomodoro_focus_minutes), 0) AS total_pomodoro_minutes
             FROM quiz_sessions
             WHERE user_id = ? AND is_completed = TRUE
             "#,
@@ -258,6 +262,8 @@ impl<'c> Table<'c, User> {
         let total_score: i64 = stats_row.try_get("total_score").unwrap_or(0);
         let total_correct: i64 = stats_row.try_get("total_correct").unwrap_or(0);
         let total_questions: i64 = stats_row.try_get("total_questions").unwrap_or(0);
+        let total_pomodoro_sessions: i64 = stats_row.try_get("total_pomodoro_sessions").unwrap_or(0);
+        let total_pomodoro_minutes: i64 = stats_row.try_get("total_pomodoro_minutes").unwrap_or(0);
 
         let avg_score = if total_quizzes > 0 {
             let raw = total_score as f64 / total_quizzes as f64;
@@ -321,6 +327,8 @@ impl<'c> Table<'c, User> {
             learning_streak_days: streak,
             total_correct,
             total_questions,
+            total_pomodoro_sessions,
+            total_pomodoro_minutes,
         })
     }
 
@@ -456,7 +464,28 @@ impl<'c> Table<'c, User> {
             }
         }
 
-        Ok(PublicStats { total_quizzes, avg_score, best_score, learning_streak_days: streak, favorite_category })
+        // Fetch XP and level from users table
+        let (total_xp, current_level): (i64, i32) = sqlx::query_as(
+            "SELECT total_xp, current_level FROM users WHERE id = ?"
+        )
+        .bind(user_id)
+        .fetch_one(&*self.pool)
+        .await
+        .unwrap_or((0, 1));
+
+        let (level_cfg, _, _) = compute_level_info(total_xp);
+
+        Ok(PublicStats {
+            total_quizzes,
+            avg_score,
+            best_score,
+            learning_streak_days: streak,
+            favorite_category,
+            total_xp,
+            current_level,
+            level_name: level_cfg.name.to_string(),
+            level_icon: level_cfg.icon.to_string(),
+        })
     }
 
     pub async fn get_best_scores_by_category(&self, user_id: &str) -> Result<Vec<CategoryBestScore>, Error> {
@@ -478,6 +507,42 @@ impl<'c> Table<'c, User> {
             best_score: row.get("best_score"),
             total_attempts: row.get("total_attempts"),
         }).collect())
+    }
+
+    pub async fn get_user_preferences(&self, user_id: &str) -> Result<UserPreferences, Error> {
+        let row = sqlx::query(
+            "SELECT preferences FROM users WHERE id = ? AND deleted_at IS NULL"
+        )
+        .bind(user_id)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        let prefs = row
+            .and_then(|r| r.try_get::<Option<String>, _>("preferences").ok().flatten())
+            .and_then(|json| serde_json::from_str::<UserPreferences>(&json).ok())
+            .unwrap_or_default();
+
+        Ok(prefs)
+    }
+
+    pub async fn update_user_preferences(&self, user_id: &str, req: &UpdatePreferencesRequest) -> Result<UserPreferences, Error> {
+        let current = self.get_user_preferences(user_id).await?;
+
+        let updated = UserPreferences {
+            pomodoro: req.pomodoro.clone().unwrap_or(current.pomodoro),
+        };
+
+        let json = serde_json::to_string(&updated).unwrap_or_else(|_| "{}".to_string());
+
+        sqlx::query(
+            "UPDATE users SET preferences = ?, updated_at = NOW() WHERE id = ? AND deleted_at IS NULL"
+        )
+        .bind(&json)
+        .bind(user_id)
+        .execute(&*self.pool)
+        .await?;
+
+        Ok(updated)
     }
 
     pub async fn set_username_if_null(&self, user_id: &str, username: &str) -> Result<(), Error> {
