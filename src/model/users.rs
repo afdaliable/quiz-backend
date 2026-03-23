@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use utoipa::ToSchema;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -9,14 +9,21 @@ pub struct User {
     pub id: String,
     pub email: String,
     pub display_name: String,
+    pub username: Option<String>,
     pub picture_url: Option<String>,
     pub phone_number: Option<String>,
+    pub profile_public: bool,
+    pub privacy_settings: Option<String>,
     pub role: Option<String>,
     pub status: Option<String>,
     pub last_login: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub onboarding_completed: bool,
+    pub onboarding_goals: Option<String>,
+    pub exam_timeframe: Option<String>,
+    pub target_exam_date: Option<NaiveDate>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for User {
@@ -25,14 +32,21 @@ impl<'c> FromRow<'c, MySqlRow> for User {
             id: row.get("id"),
             email: row.get("email"),
             display_name: row.get("display_name"),
+            username: row.try_get("username").unwrap_or(None),
             picture_url: row.get("picture_url"),
             phone_number: row.get("phone_number"),
+            profile_public: row.try_get("profile_public").unwrap_or(true),
+            privacy_settings: row.try_get("privacy_settings").unwrap_or(None),
             role: row.get("role"),
             status: row.get("status"),
             last_login: row.get("last_login"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
             deleted_at: row.get("deleted_at"),
+            onboarding_completed: row.try_get("onboarding_completed").unwrap_or(false),
+            onboarding_goals: row.try_get("onboarding_goals").unwrap_or(None),
+            exam_timeframe: row.try_get("exam_timeframe").unwrap_or(None),
+            target_exam_date: row.try_get("target_exam_date").unwrap_or(None),
         })
     }
 }
@@ -169,6 +183,49 @@ pub struct UserProfileResponse {
     pub joined_at: DateTime<Utc>,
     pub account_status: String, // "Free" | "Premium"
     pub premium_expires_at: Option<DateTime<Utc>>,
+    pub onboarding_completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OnboardingRequest {
+    pub goals: Vec<String>,
+    pub timeframe: Option<String>,
+    pub exam_date: Option<NaiveDate>,
+    pub onboarding_completed: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct OnboardingResponse {
+    pub success: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RecommendedPackage {
+    pub id: i32,
+    pub name: String,
+    pub category: String,
+    pub question_count: i64,
+    pub is_free: bool,
+    pub is_premium: bool,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for RecommendedPackage {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(RecommendedPackage {
+            id: row.get("id"),
+            name: row.get("name"),
+            category: row.get("category"),
+            question_count: row.get("question_count"),
+            is_free: row.get("is_free"),
+            is_premium: row.get("is_premium"),
+        })
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct RecommendationsResponse {
+    pub data: Vec<RecommendedPackage>,
+    pub based_on_goals: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]

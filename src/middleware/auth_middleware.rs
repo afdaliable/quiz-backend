@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 17] = [
+const PUBLIC_ROUTES: [&str; 23] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -113,6 +113,12 @@ const PUBLIC_ROUTES: [&str; 17] = [
     "/license-public",
     "/admin",     // Admin routes handle their own auth via Authentik
     "/api/admin", // API-prefixed version
+    "/internal",     // Internal routes secured by IP whitelist + API key
+    "/api/internal", // API-prefixed version
+    "/questions",    // Comment GET endpoints allow anonymous read
+    "/subscription/webhook", // Midtrans webhook — no JWT from payment gateway
+    "/users/profile",         // Public profile — no auth required
+    "/users/username/check",  // Username availability check — no auth required
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware

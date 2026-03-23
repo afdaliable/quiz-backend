@@ -22,6 +22,13 @@ pub mod admin_packages_controller;
 pub mod admin_paket_soal_items_controller;
 pub mod admin_analytics_controller;
 
+// Internal endpoints (IP + API key restricted, no OAuth)
+pub mod internal_soal_controller;
+
+pub mod question_comment_controller;
+pub mod subscription_controller;
+pub mod public_profile_controller;
+
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;
 pub use soal_controller::init as init_soal_controller;
@@ -40,6 +47,12 @@ pub use admin_soal_controller::init as init_admin_soal_controller;
 pub use admin_packages_controller::init as init_admin_packages_controller;
 pub use admin_paket_soal_items_controller::init as init_admin_paket_soal_items_controller;
 pub use admin_analytics_controller::init as init_admin_analytics_controller;
+
+// Internal endpoint exports
+pub use internal_soal_controller::init as init_internal_soal_controller;
+
+pub use question_comment_controller::init as init_question_comment_controller;
+pub use subscription_controller::init as init_subscription_controller;
 
 fn log_request(route: &'static str, connections: &Mutex<u32>) {
     let mut con = connections.lock().unwrap();

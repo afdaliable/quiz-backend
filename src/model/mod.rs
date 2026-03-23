@@ -20,6 +20,10 @@ pub mod premium_quiz_access;
 pub mod payment_transaction;
 pub mod license_code;
 pub mod bookmarked_questions;
+pub mod question_comment;
+pub mod midtrans;
+pub mod score_history;
+pub mod public_profile;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
@@ -33,4 +37,4 @@ pub type HargaPaket = harga_paket::HargaPaket;
 pub use auth::{SignUpRequest, LoginRequest, AuthResponse, SupabaseUser};
 pub use users::User;
 pub use session::{Session, SessionResponse};
-pub use quiz_session::{QuizSession, QuizSessionResponse, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest, LeaderboardEntry, LeaderboardQuery, QuizHistoryResponse, QuizHistoryQuery};
+pub use quiz_session::{QuizSession, QuizSessionResponse, CreateQuizSessionRequest, UpdateQuizSessionRequest, CompleteQuizSessionRequest, LeaderboardEntry, LeaderboardQuery, QuizHistoryResponse, QuizHistoryQuery, StartRandomSessionRequest, StartRandomSessionResponse, RandomSessionSoal};
