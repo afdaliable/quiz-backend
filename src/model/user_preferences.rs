@@ -28,11 +28,13 @@ impl Default for PomodoroPreferences {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ThemePreferences {
     pub dark_mode: bool,
+    #[serde(default)]
+    pub easy_reading: bool,
 }
 
 impl Default for ThemePreferences {
     fn default() -> Self {
-        ThemePreferences { dark_mode: false }
+        ThemePreferences { dark_mode: false, easy_reading: false }
     }
 }
 
