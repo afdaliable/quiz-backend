@@ -2,6 +2,7 @@ use super::Table;
 use crate::model::User;
 use crate::model::users::{UserProfileResponse, UserLearningStatsResponse};
 use crate::model::public_profile::{PublicStats, CategoryBestScore, PrivacySettings};
+use crate::levels::compute_level_info;
 use sqlx::{Error, Row};
 use chrono::{NaiveDate, Utc};
 
@@ -456,7 +457,28 @@ impl<'c> Table<'c, User> {
             }
         }
 
-        Ok(PublicStats { total_quizzes, avg_score, best_score, learning_streak_days: streak, favorite_category })
+        // Fetch XP and level from users table
+        let (total_xp, current_level): (i64, i32) = sqlx::query_as(
+            "SELECT total_xp, current_level FROM users WHERE id = ?"
+        )
+        .bind(user_id)
+        .fetch_one(&*self.pool)
+        .await
+        .unwrap_or((0, 1));
+
+        let (level_cfg, _, _) = compute_level_info(total_xp);
+
+        Ok(PublicStats {
+            total_quizzes,
+            avg_score,
+            best_score,
+            learning_streak_days: streak,
+            favorite_category,
+            total_xp,
+            current_level,
+            level_name: level_cfg.name.to_string(),
+            level_icon: level_cfg.icon.to_string(),
+        })
     }
 
     pub async fn get_best_scores_by_category(&self, user_id: &str) -> Result<Vec<CategoryBestScore>, Error> {

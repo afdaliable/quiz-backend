@@ -1,8 +1,11 @@
 use crate::controller::log_request;
 use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse, OnboardingRequest, OnboardingResponse, RecommendationsResponse};
+use crate::model::xp::{UserXpResponse, XpHistoryEntry, XpHistoryResponse};
 use crate::model::{QuizHistoryQuery};
+use crate::levels::compute_level_info;
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json;
 use utoipa::ToSchema;
@@ -22,6 +25,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route("/stats", web::get().to(get_user_stats))
             .route("/onboarding", web::patch().to(update_onboarding))
             .route("/recommendations", web::get().to(get_recommendations))
+            .route("/me/xp", web::get().to(get_user_xp))
+            .route("/me/xp/history", web::get().to(get_user_xp_history))
     );
 }
 
@@ -295,4 +300,123 @@ async fn get_user_stats(
             error: format!("Failed to get user stats: {}", e),
         }),
     }
+}
+
+/// Get XP status of the authenticated user
+async fn get_user_xp(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    let pool = &*data.context.users.pool;
+
+    let row: Option<(i64, i32)> = sqlx::query_as(
+        "SELECT total_xp, current_level FROM users WHERE id = ? AND deleted_at IS NULL",
+    )
+    .bind(&user_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+
+    let (total_xp, _) = match row {
+        Some(r) => r,
+        None => return HttpResponse::NotFound().json(ErrorResponse {
+            error: "User not found".to_string(),
+        }),
+    };
+
+    let (level_cfg, next_cfg, progress) = compute_level_info(total_xp);
+    let xp_in_level = total_xp - level_cfg.total_xp_required;
+    let xp_to_next_level = next_cfg.map(|n| n.total_xp_required - total_xp);
+
+    let global_rank: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) + 1 FROM users WHERE total_xp > ? AND deleted_at IS NULL",
+    )
+    .bind(total_xp)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(1);
+
+    HttpResponse::Ok().json(UserXpResponse {
+        total_xp,
+        current_level: level_cfg.level,
+        level_name: level_cfg.name.to_string(),
+        level_icon: level_cfg.icon.to_string(),
+        progress,
+        xp_in_level,
+        xp_to_next_level,
+        global_rank,
+    })
+}
+
+/// Get paginated XP transaction history of the authenticated user
+async fn get_user_xp_history(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+    query: web::Query<std::collections::HashMap<String, String>>,
+) -> impl Responder {
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    let page: u32 = query.get("page")
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(1)
+        .max(1);
+    let limit: u32 = query.get("limit")
+        .and_then(|l| l.parse().ok())
+        .unwrap_or(20)
+        .min(100)
+        .max(1);
+    let offset = (page - 1) * limit;
+
+    let pool = &*data.context.users.pool;
+
+    let total: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM xp_transactions WHERE user_id = ?",
+    )
+    .bind(&user_id)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+
+    let rows: Vec<(String, i32, String, Option<String>, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT id, amount, source, description, created_at FROM xp_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+    )
+    .bind(&user_id)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let entries: Vec<XpHistoryEntry> = rows
+        .into_iter()
+        .map(|(id, amount, source, description, created_at)| XpHistoryEntry {
+            id,
+            amount,
+            source,
+            description,
+            created_at,
+        })
+        .collect();
+
+    let total_pages = if total == 0 { 1 } else { ((total as u32) + limit - 1) / limit };
+
+    HttpResponse::Ok().json(XpHistoryResponse {
+        entries,
+        total,
+        page,
+        limit,
+        total_pages,
+    })
 }
