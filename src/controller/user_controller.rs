@@ -1,6 +1,7 @@
 use crate::controller::log_request;
 use crate::model::users::{CheckPhoneNumberRequest, CheckPhoneNumberResponse, UpdatePhoneNumberRequest, UpdatePhoneNumberResponse, OnboardingRequest, OnboardingResponse, RecommendationsResponse};
 use crate::model::xp::{UserXpResponse, XpHistoryEntry, XpHistoryResponse};
+use crate::model::user_preferences::UpdatePreferencesRequest;
 use crate::model::{QuizHistoryQuery};
 use crate::levels::compute_level_info;
 use crate::AppState;
@@ -27,6 +28,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route("/recommendations", web::get().to(get_recommendations))
             .route("/me/xp", web::get().to(get_user_xp))
             .route("/me/xp/history", web::get().to(get_user_xp_history))
+            .route("/preferences", web::get().to(get_preferences))
+            .route("/preferences", web::put().to(update_preferences))
     );
 }
 
@@ -353,6 +356,47 @@ async fn get_user_xp(
         xp_to_next_level,
         global_rank,
     })
+}
+
+/// Get preferences of the authenticated user
+async fn get_preferences(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    match data.context.users.get_user_preferences(&user_id).await {
+        Ok(prefs) => HttpResponse::Ok().json(prefs),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to get preferences: {}", e),
+        }),
+    }
+}
+
+/// Update preferences of the authenticated user
+async fn update_preferences(
+    req: web::Json<UpdatePreferencesRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let user_id = match http_req.headers().get("user_id") {
+        Some(id) => id.to_str().unwrap_or_default().to_string(),
+        None => return HttpResponse::Unauthorized().json(ErrorResponse {
+            error: "Unauthorized".to_string(),
+        }),
+    };
+
+    match data.context.users.update_user_preferences(&user_id, &req).await {
+        Ok(prefs) => HttpResponse::Ok().json(prefs),
+        Err(e) => HttpResponse::InternalServerError().json(ErrorResponse {
+            error: format!("Failed to update preferences: {}", e),
+        }),
+    }
 }
 
 /// Get paginated XP transaction history of the authenticated user

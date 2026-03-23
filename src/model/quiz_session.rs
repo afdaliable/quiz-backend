@@ -21,6 +21,10 @@ pub struct QuizSession {
     pub score: i32,
     pub correct_answers: i32,
     pub incorrect_answers: i32,
+    pub pomodoro_enabled: bool,
+    pub pomodoro_sessions: i32,
+    pub pomodoro_focus_minutes: i32,
+    pub pomodoro_questions_answered: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -44,6 +48,10 @@ impl<'c> FromRow<'c, MySqlRow> for QuizSession {
             score: row.get("score"),
             correct_answers: row.get("correct_answers"),
             incorrect_answers: row.get("incorrect_answers"),
+            pomodoro_enabled: row.try_get("pomodoro_enabled").unwrap_or(false),
+            pomodoro_sessions: row.try_get("pomodoro_sessions").unwrap_or(0),
+            pomodoro_focus_minutes: row.try_get("pomodoro_focus_minutes").unwrap_or(0),
+            pomodoro_questions_answered: row.try_get("pomodoro_questions_answered").unwrap_or(0),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -76,6 +84,11 @@ pub struct UpdateQuizSessionRequest {
 pub struct CompleteQuizSessionRequest {
     pub answers: Vec<Option<i32>>,
     pub time_remaining: i32,
+    // Pomodoro stats (optional — only present when Pomodoro was active)
+    pub pomodoro_enabled: Option<bool>,
+    pub pomodoro_sessions: Option<i32>,
+    pub pomodoro_focus_minutes: Option<i32>,
+    pub pomodoro_questions_answered: Option<i32>,
 }
 
 /// Soal yang dikembalikan ke client untuk sesi random — tanpa correct_answer
@@ -124,6 +137,10 @@ pub struct QuizSessionResponse {
     pub score: i32,
     pub correct_answers: i32,
     pub incorrect_answers: i32,
+    pub pomodoro_enabled: bool,
+    pub pomodoro_sessions: i32,
+    pub pomodoro_focus_minutes: i32,
+    pub pomodoro_questions_answered: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -207,6 +224,10 @@ impl From<QuizSession> for QuizSessionResponse {
             score: session.score,
             correct_answers: session.correct_answers,
             incorrect_answers: session.incorrect_answers,
+            pomodoro_enabled: session.pomodoro_enabled,
+            pomodoro_sessions: session.pomodoro_sessions,
+            pomodoro_focus_minutes: session.pomodoro_focus_minutes,
+            pomodoro_questions_answered: session.pomodoro_questions_answered,
             created_at: session.created_at,
             updated_at: session.updated_at,
         }

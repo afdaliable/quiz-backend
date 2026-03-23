@@ -242,4 +242,6 @@ pub struct UserLearningStatsResponse {
     pub learning_streak_days: i64,
     pub total_correct: i64,
     pub total_questions: i64,
+    pub total_pomodoro_sessions: i64,
+    pub total_pomodoro_minutes: i64,
 }
