@@ -26,14 +26,28 @@ impl Default for PomodoroPreferences {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ThemePreferences {
+    pub dark_mode: bool,
+}
+
+impl Default for ThemePreferences {
+    fn default() -> Self {
+        ThemePreferences { dark_mode: false }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserPreferences {
     pub pomodoro: PomodoroPreferences,
+    #[serde(default)]
+    pub theme: ThemePreferences,
 }
 
 impl Default for UserPreferences {
     fn default() -> Self {
         UserPreferences {
             pomodoro: PomodoroPreferences::default(),
+            theme: ThemePreferences::default(),
         }
     }
 }
@@ -41,4 +55,5 @@ impl Default for UserPreferences {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdatePreferencesRequest {
     pub pomodoro: Option<PomodoroPreferences>,
+    pub theme: Option<ThemePreferences>,
 }
