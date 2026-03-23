@@ -530,6 +530,7 @@ impl<'c> Table<'c, User> {
 
         let updated = UserPreferences {
             pomodoro: req.pomodoro.clone().unwrap_or(current.pomodoro),
+            theme: req.theme.clone().unwrap_or(current.theme),
         };
 
         let json = serde_json::to_string(&updated).unwrap_or_else(|_| "{}".to_string());
