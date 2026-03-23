@@ -26,6 +26,10 @@ pub struct PublicStats {
     pub best_score: i64,
     pub learning_streak_days: i64,
     pub favorite_category: Option<String>,
+    pub total_xp: i64,
+    pub current_level: i32,
+    pub level_name: String,
+    pub level_icon: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

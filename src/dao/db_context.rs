@@ -14,6 +14,7 @@ use crate::model::ListPaketSoalLengkap;
 use crate::model::Session;
 use crate::model::QuizSession;
 use crate::model::users::RecommendedPackage;
+use crate::model::daily_challenge::DailyChallenge;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
@@ -268,6 +269,7 @@ pub struct Database<'c> {
     pub premium_quiz_access: Arc<Table<'c, PremiumQuizAccess>>,
     pub payment_transactions: Arc<Table<'c, PaymentTransaction>>,
     pub license_codes: Arc<Table<'c, LicenseCode>>,
+    pub daily_challenges: Arc<Table<'c, DailyChallenge>>,
 }
 
 impl<'a> Database<'a> {
@@ -287,6 +289,7 @@ impl<'a> Database<'a> {
             premium_quiz_access: Arc::new(Table::new(pool.clone())),
             payment_transactions: Arc::new(Table::new(pool.clone())),
             license_codes: Arc::new(Table::new(pool.clone())),
+            daily_challenges: Arc::new(Table::new(pool.clone())),
         }
     }
 }
