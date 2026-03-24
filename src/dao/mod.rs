@@ -23,6 +23,7 @@ mod premium_quiz_access_dao;
 mod payment_transaction_dao;
 mod license_code_dao;
 pub mod license_dao;
+pub mod question_feedback_dao;
 // mod user_to_group_dao;
 
 pub use db_context::Database;
