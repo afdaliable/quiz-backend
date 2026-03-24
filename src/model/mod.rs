@@ -24,6 +24,7 @@ pub mod question_comment;
 pub mod midtrans;
 pub mod score_history;
 pub mod public_profile;
+pub mod search;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;
