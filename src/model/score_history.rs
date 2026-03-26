@@ -20,7 +20,7 @@ pub struct ScoreSummary {
     pub average: f64,
     pub highest: i32,
     pub lowest: i32,
-    pub trend: f64,
+    pub trend: f64,         // positif = naik, negatif = turun
     pub total_attempts: i64,
 }
 
@@ -28,4 +28,11 @@ pub struct ScoreSummary {
 pub struct ScoreHistoryResponse {
     pub data_points: Vec<ScoreDataPoint>,
     pub summary: ScoreSummary,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScoreHistoryQuery {
+    pub package_id: Option<i32>,
+    pub category: Option<String>,
+    pub days: Option<i32>,  // 7 | 30 | 90 | 0 = semua
 }
