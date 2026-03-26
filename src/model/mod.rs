@@ -23,6 +23,7 @@ pub mod bookmarked_questions;
 pub mod question_comment;
 pub mod midtrans;
 pub mod score_history;
+pub mod public_profile;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;

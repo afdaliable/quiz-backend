@@ -9,6 +9,49 @@ use jsonwebtoken::{encode, Header, EncodingKey, Algorithm};
 use chrono::{Utc, Duration};
 use oauth2::TokenResponse;
 
+/// Derive a candidate username from a display name (slugify)
+fn slugify_display_name(name: &str) -> String {
+    let base: String = name
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let trimmed = base.trim_matches('_');
+    if trimmed.len() > 25 {
+        trimmed[..25].to_string()
+    } else if trimmed.is_empty() {
+        "user".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Try to assign a unique username derived from the display_name.
+/// Silently skips if all attempts fail (username stays NULL).
+async fn assign_auto_username(
+    users_dao: &crate::dao::Table<'_, crate::model::User>,
+    user_id: &str,
+    display_name: &str,
+) {
+    let base = slugify_display_name(display_name);
+    // Try base, then base_1 … base_999
+    let candidates = std::iter::once(base.clone())
+        .chain((1u32..=999).map(|n| format!("{}_{}", base, n)));
+    for candidate in candidates {
+        match users_dao.username_exists(&candidate).await {
+            Ok(false) => {
+                let _ = users_dao.set_username_if_null(user_id, &candidate).await;
+                return;
+            }
+            _ => continue,
+        }
+    }
+}
+
 /// Request payload for Google OAuth callback
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GoogleAuthRequest {
@@ -320,6 +363,13 @@ async fn google_callback(
                             
                             match result {
                                 Ok(_) => {
+                                    // Auto-assign username derived from display_name
+                                    assign_auto_username(
+                                        &app_state.context.users,
+                                        &user_id,
+                                        &display_name,
+                                    ).await;
+
                                     // Generate JWT token for new user
                                     let now = Utc::now();
                                     let expiration = now
