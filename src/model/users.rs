@@ -179,6 +179,7 @@ pub struct UserProfileResponse {
     pub id: String,
     pub email: String,
     pub display_name: String,
+    pub username: Option<String>,
     pub picture_url: Option<String>,
     pub joined_at: DateTime<Utc>,
     pub account_status: String, // "Free" | "Premium"
