@@ -1876,6 +1876,7 @@ dependencies = [
  "actix-multipart",
  "actix-rt",
  "actix-web",
+ "async-trait",
  "base64 0.21.7",
  "chrono",
  "csv",
