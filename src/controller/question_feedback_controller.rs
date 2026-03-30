@@ -159,13 +159,11 @@ async fn admin_update_report(
 // ── Route registration ────────────────────────────────────────────────────────
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
-    // User-facing routes (auth required — enforced by global AuthMiddleware)
-    cfg.service(
-        web::scope("/questions")
-            .route("/{id}/rate",    web::post().to(rate_question))
-            .route("/{id}/ratings", web::get().to(get_ratings))
-            .route("/{id}/report",  web::post().to(report_question)),
-    );
+    // User-facing routes — flat (bukan scope) agar tidak konflik dengan
+    // question_comment_controller yang sudah pakai scope("/questions")
+    cfg.route("/questions/{id}/rate",    web::post().to(rate_question))
+       .route("/questions/{id}/ratings", web::get().to(get_ratings))
+       .route("/questions/{id}/report",  web::post().to(report_question));
 
     // Admin routes (additionally wrapped with AdminMiddleware)
     cfg.service(
