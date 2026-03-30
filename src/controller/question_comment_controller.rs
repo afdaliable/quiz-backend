@@ -1,4 +1,5 @@
 use crate::controller::log_request;
+use crate::controller::question_feedback_controller;
 use crate::model::question_comment::{
     CommentListQuery, CommentListResponse, CommentResponse, CommentUser,
     CreateCommentRequest, PinCommentRequest, ToggleUpvoteResponse,
@@ -29,18 +30,13 @@ fn extract_user_id(req: &HttpRequest) -> Option<String> {
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/questions")
-            .route(
-                "/{question_id}/comments",
-                web::get().to(list_comments),
-            )
-            .route(
-                "/{question_id}/comments",
-                web::post().to(create_comment),
-            )
-            .route(
-                "/{question_id}/comments/{comment_id}/replies",
-                web::get().to(list_replies),
-            ),
+            .route("/{question_id}/comments",                    web::get().to(list_comments))
+            .route("/{question_id}/comments",                    web::post().to(create_comment))
+            .route("/{question_id}/comments/{comment_id}/replies", web::get().to(list_replies))
+            // AFD-145: rating & report routes — digabung di sini agar satu scope
+            .route("/{id}/rate",    web::post().to(question_feedback_controller::rate_question))
+            .route("/{id}/ratings", web::get().to(question_feedback_controller::get_ratings))
+            .route("/{id}/report",  web::post().to(question_feedback_controller::report_question)),
     );
     cfg.service(
         web::scope("/comments")
