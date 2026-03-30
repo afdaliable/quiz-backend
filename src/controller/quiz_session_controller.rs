@@ -3,6 +3,8 @@ use crate::model::{
     QuizSession, QuizSessionResponse, CreateQuizSessionRequest,
     UpdateQuizSessionRequest, CompleteQuizSessionRequest, StartRandomSessionRequest,
 };
+use crate::model::xp::{XpBreakdownResponse, XpAwardResultResponse, CompleteSessionWithXpResponse};
+use crate::service::xp_service::{compute_quiz_xp, award_quiz_xp};
 use crate::AppState;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 
@@ -141,8 +143,51 @@ pub async fn complete_quiz_session(
 
     match state.context.quiz_sessions.complete_quiz_session(&session_id, user_id, &req).await {
         Ok(session) => {
-            let response: QuizSessionResponse = session.into();
-            HttpResponse::Ok().json(response)
+            // Award XP — never fail the quiz request if XP fails
+            let is_study_mode = session.session_type == "study";
+            let breakdown = compute_quiz_xp(session.score, session.correct_answers, is_study_mode);
+            let pool = &*state.context.users.pool;
+            let xp_result = award_quiz_xp(pool, user_id, &session.id, &breakdown).await.ok();
+
+            let xp_breakdown_resp = XpBreakdownResponse {
+                quiz_complete: breakdown.quiz_complete,
+                correct_answers: breakdown.correct_answers,
+                score_bonus: breakdown.score_bonus,
+                total: breakdown.total,
+            };
+            let xp_result_resp = xp_result.map(|r| XpAwardResultResponse {
+                xp_awarded: r.xp_awarded,
+                total_xp: r.total_xp,
+                leveled_up: r.leveled_up,
+                new_level: r.new_level,
+                new_level_name: r.new_level_name,
+                new_level_icon: r.new_level_icon,
+            });
+
+            let resp: QuizSessionResponse = session.into();
+            let with_xp = CompleteSessionWithXpResponse {
+                id: resp.id,
+                user_id: resp.user_id,
+                paket_soal_id: resp.paket_soal_id,
+                kategori_soal: resp.kategori_soal,
+                nama_paket_soal: resp.nama_paket_soal,
+                session_type: resp.session_type,
+                question_ids: resp.question_ids,
+                current_question: resp.current_question,
+                answers: resp.answers,
+                marked_questions: resp.marked_questions,
+                time_remaining: resp.time_remaining,
+                total_time: resp.total_time,
+                is_completed: resp.is_completed,
+                score: resp.score,
+                correct_answers: resp.correct_answers,
+                incorrect_answers: resp.incorrect_answers,
+                created_at: resp.created_at,
+                updated_at: resp.updated_at,
+                xp_breakdown: Some(xp_breakdown_resp),
+                xp_result: xp_result_resp,
+            };
+            HttpResponse::Ok().json(with_xp)
         }
         Err(sqlx::Error::RowNotFound) => {
             HttpResponse::NotFound().json({

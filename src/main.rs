@@ -109,8 +109,10 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_internal_soal_controller)
             .configure(controller::init_question_comment_controller)
             .configure(controller::init_subscription_controller)
+            .configure(controller::init_analytics_controller)
             .configure(quiz_backend::controller::public_profile_controller::configure_routes)
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
+            .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),
