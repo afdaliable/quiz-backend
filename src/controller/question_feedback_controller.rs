@@ -16,7 +16,7 @@ fn extract_user_id(req: &HttpRequest) -> Option<String> {
 /// POST /questions/{id}/rate
 /// Body: `{ "rating": "helpful" | "confusing" }` — upsert
 /// Body ausente / null → hapus rating (toggle off)
-async fn rate_question(
+pub async fn rate_question(
     req: HttpRequest,
     path: web::Path<i32>,
     body: web::Bytes,
@@ -49,7 +49,7 @@ async fn rate_question(
 }
 
 /// GET /questions/{id}/ratings
-async fn get_ratings(
+pub async fn get_ratings(
     req: HttpRequest,
     path: web::Path<i32>,
     data: web::Data<AppState<'_>>,
@@ -66,7 +66,7 @@ async fn get_ratings(
 }
 
 /// POST /questions/{id}/report
-async fn report_question(
+pub async fn report_question(
     req: HttpRequest,
     path: web::Path<i32>,
     body: web::Json<SubmitReportRequest>,
@@ -159,11 +159,9 @@ async fn admin_update_report(
 // ── Route registration ────────────────────────────────────────────────────────
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
-    // User-facing routes — flat (bukan scope) agar tidak konflik dengan
-    // question_comment_controller yang sudah pakai scope("/questions")
-    cfg.route("/questions/{id}/rate",    web::post().to(rate_question))
-       .route("/questions/{id}/ratings", web::get().to(get_ratings))
-       .route("/questions/{id}/report",  web::post().to(report_question));
+    // User-facing /questions/{id}/rate|ratings|report routes are registered
+    // inside question_comment_controller's existing scope("/questions")
+    // to avoid actix-web "first-match wins" scope conflict.
 
     // Admin routes (additionally wrapped with AdminMiddleware)
     cfg.service(
