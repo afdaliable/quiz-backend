@@ -67,14 +67,16 @@ pub async fn award_quiz_xp(
     };
 
     // Fetch current XP, today's XP total, and current level
+    // CAST AS SIGNED because MySQL SUM() returns DECIMAL, not BIGINT,
+    // and sqlx 0.7 cannot decode DECIMAL into i64.
     let row: (i64, i64, i32) = sqlx::query_as(
         r#"
         SELECT
             u.total_xp,
-            COALESCE(SUM(CASE
+            CAST(COALESCE(SUM(CASE
                 WHEN DATE(CONVERT_TZ(t.created_at, '+00:00', '+07:00')) = ? THEN t.amount
                 ELSE 0
-            END), 0) AS today_xp,
+            END), 0) AS SIGNED) AS today_xp,
             u.current_level
         FROM users u
         LEFT JOIN xp_transactions t ON t.user_id = u.id
