@@ -24,6 +24,7 @@ pub mod question_comment;
 pub mod midtrans;
 pub mod score_history;
 pub mod public_profile;
+pub mod search;
 pub mod question_feedback;
 pub mod xp;
 pub mod user_preferences;

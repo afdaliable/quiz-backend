@@ -111,6 +111,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_subscription_controller)
             .configure(controller::init_analytics_controller)
             .configure(quiz_backend::controller::public_profile_controller::configure_routes)
+            .configure(quiz_backend::controller::search_controller::configure_routes)
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .service(

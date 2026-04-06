@@ -29,6 +29,7 @@ pub mod question_comment_controller;
 pub mod subscription_controller;
 pub mod analytics_controller;
 pub mod public_profile_controller;
+pub mod search_controller;
 pub mod question_feedback_controller;
 pub mod leaderboard_controller;
 
