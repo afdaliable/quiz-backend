@@ -303,7 +303,7 @@ async fn update_question(
     let result = sqlx::query(
         r#"
         UPDATE dbquizapp.soal
-        SET soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
+        SET passage_id = ?, soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
             correct_answer = ?, solution = ?, sumberfile = ?, modul = ?,
             pelajaran = ?, tag = ?,
             track_id = ?, category_id = ?, subcategory_id = ?, topic_id = ?,
@@ -312,6 +312,7 @@ async fn update_question(
         WHERE id = ?
         "#
     )
+    .bind(question_req.passage_id)
     .bind(&question_req.soal)
     .bind(question_type)
     .bind(&question_req.opt1)

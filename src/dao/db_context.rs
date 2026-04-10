@@ -7,6 +7,7 @@ use super::UserSubscription;
 use super::PremiumQuizAccess;
 use super::PaymentTransaction;
 use super::LicenseCode;
+use crate::model::passage::Passage;
 use crate::model::PaketSoalResponse;
 use crate::model::ListPaketSoal;
 use crate::model::User;
@@ -268,6 +269,7 @@ pub struct Database<'c> {
     pub premium_quiz_access: Arc<Table<'c, PremiumQuizAccess>>,
     pub payment_transactions: Arc<Table<'c, PaymentTransaction>>,
     pub license_codes: Arc<Table<'c, LicenseCode>>,
+    pub passages: Arc<Table<'c, Passage>>,
 }
 
 impl<'a> Database<'a> {
@@ -287,6 +289,7 @@ impl<'a> Database<'a> {
             premium_quiz_access: Arc::new(Table::new(pool.clone())),
             payment_transactions: Arc::new(Table::new(pool.clone())),
             license_codes: Arc::new(Table::new(pool.clone())),
+            passages: Arc::new(Table::new(pool.clone())),
         }
     }
 }

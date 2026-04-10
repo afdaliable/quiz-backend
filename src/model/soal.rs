@@ -10,6 +10,8 @@ use chrono::{DateTime, Utc};
 pub struct Soal {
     /// Unique identifier for the soal
     pub id: i32,
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// The question text
     pub soal: String,
     /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
@@ -61,6 +63,8 @@ pub struct Soal {
 /// Request payload for creating a new soal
 #[derive(Debug, Deserialize, Serialize, ToSchema, Clone)]
 pub struct CreateSoalRequest {
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// Question text
     pub soal: String,
     /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
@@ -104,6 +108,7 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(Soal {
             id: row.get("id"),
+            passage_id: row.try_get("passage_id").unwrap_or(None),
             soal: row.get("soal"),
             question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
             opt1: row.get("opt1"),
@@ -139,6 +144,8 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
 pub struct AdminSoal {
     /// Unique identifier for the soal
     pub id: i32,
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// The question text
     pub soal: String,
     /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
@@ -197,6 +204,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(AdminSoal {
             id: row.get("id"),
+            passage_id: row.try_get("passage_id").unwrap_or(None),
             soal: row.get("soal"),
             question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
             opt1: row.get("opt1"),
@@ -254,6 +262,8 @@ pub struct PaginatedQuestionsResponse {
 /// Request for updating a question
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateSoalRequest {
+    /// Optional reference to a shared reading passage (null = unassign)
+    pub passage_id: Option<i32>,
     /// Question text
     pub soal: String,
     /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
@@ -340,4 +350,12 @@ pub struct CsvImportError {
     pub message: String,
     pub suggested_fix: Option<String>,
     pub raw_value: Option<String>,
+}
+
+/// Soal with its associated passage inlined (for quiz session responses)
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct SoalWithPassage {
+    #[serde(flatten)]
+    pub soal: Soal,
+    pub passage: Option<crate::model::passage::PassageSummary>,
 }
