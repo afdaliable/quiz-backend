@@ -21,6 +21,7 @@ pub mod admin_soal_controller;
 pub mod admin_packages_controller;
 pub mod admin_paket_soal_items_controller;
 pub mod admin_analytics_controller;
+pub mod admin_passage_controller;
 
 // Internal endpoints (IP + API key restricted, no OAuth)
 pub mod internal_soal_controller;
@@ -51,6 +52,7 @@ pub use admin_soal_controller::init as init_admin_soal_controller;
 pub use admin_packages_controller::init as init_admin_packages_controller;
 pub use admin_paket_soal_items_controller::init as init_admin_paket_soal_items_controller;
 pub use admin_analytics_controller::init as init_admin_analytics_controller;
+pub use admin_passage_controller::init as init_admin_passage_controller;
 
 // Internal endpoint exports
 pub use internal_soal_controller::init as init_internal_soal_controller;
