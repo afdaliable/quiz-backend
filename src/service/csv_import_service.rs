@@ -440,6 +440,16 @@ impl CsvImportService {
                 modul: if modul.is_empty() { None } else { Some(modul) },
                 pelajaran: if pelajaran.is_empty() { None } else { Some(pelajaran) },
                 tag: if tag.is_empty() { None } else { Some(tag) },
+                track_id: None,
+                category_id: None,
+                subcategory_id: None,
+                topic_id: None,
+                difficulty_est: None,
+                difficulty_calc: None,
+                bloom_level: None,
+                format: None,
+                source: None,
+                status: None,
             })
         } else {
             None

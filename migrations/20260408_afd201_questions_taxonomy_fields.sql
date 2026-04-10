@@ -1,0 +1,25 @@
+-- AFD-201: Add taxonomy FK fields and metadata columns to soal table
+
+ALTER TABLE soal
+    ADD COLUMN track_id        CHAR(36)     NULL AFTER tag,
+    ADD COLUMN category_id     CHAR(36)     NULL AFTER track_id,
+    ADD COLUMN subcategory_id  CHAR(36)     NULL AFTER category_id,
+    ADD COLUMN topic_id        CHAR(36)     NULL AFTER subcategory_id,
+    ADD COLUMN difficulty_est  ENUM('easy', 'medium', 'hard') NOT NULL DEFAULT 'medium' AFTER topic_id,
+    ADD COLUMN difficulty_calc ENUM('easy', 'medium', 'hard') NULL AFTER difficulty_est,
+    ADD COLUMN bloom_level     ENUM('remember', 'understand', 'apply', 'analyze', 'evaluate', 'create') NULL AFTER difficulty_calc,
+    ADD COLUMN format          ENUM('pg', 'true_false', 'fill_blank', 'essay') NOT NULL DEFAULT 'pg' AFTER bloom_level,
+    ADD COLUMN source          VARCHAR(100) NULL AFTER format,
+    ADD COLUMN status          ENUM('draft', 'active', 'archived') NOT NULL DEFAULT 'draft' AFTER source,
+    ADD COLUMN p_value         FLOAT        NULL AFTER status,
+    ADD COLUMN avg_time_sec    FLOAT        NULL AFTER p_value,
+    ADD COLUMN attempt_count   INT          NOT NULL DEFAULT 0 AFTER avg_time_sec,
+    ADD INDEX idx_soal_track      (track_id),
+    ADD INDEX idx_soal_category   (category_id),
+    ADD INDEX idx_soal_subcategory(subcategory_id),
+    ADD INDEX idx_soal_topic      (topic_id),
+    ADD INDEX idx_soal_status     (status),
+    ADD CONSTRAINT fk_soal_track       FOREIGN KEY (track_id)       REFERENCES exam_tracks(id)   ON DELETE SET NULL,
+    ADD CONSTRAINT fk_soal_category    FOREIGN KEY (category_id)    REFERENCES categories(id)    ON DELETE SET NULL,
+    ADD CONSTRAINT fk_soal_subcategory FOREIGN KEY (subcategory_id) REFERENCES subcategories(id) ON DELETE SET NULL,
+    ADD CONSTRAINT fk_soal_topic       FOREIGN KEY (topic_id)       REFERENCES topics(id)        ON DELETE SET NULL;
