@@ -53,10 +53,14 @@ impl<'c> Table<'c, Soal> {
 
     pub async fn create_soal(&self, request: &CreateSoalRequest) -> Result<Soal, Error> {
         let question_type = request.question_type.as_deref().unwrap_or("multiple_choice");
+        let difficulty_est = request.difficulty_est.as_deref().unwrap_or("medium");
+        let format = request.format.as_deref().unwrap_or("pg");
+        let status = request.status.as_deref().unwrap_or("draft");
         let result = sqlx::query(
             r#"
-            INSERT INTO dbquizapp.soal (passage_id, soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dbquizapp.soal (passage_id, soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag,
+                track_id, category_id, subcategory_id, topic_id, difficulty_est, difficulty_calc, bloom_level, format, source, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#)
             .bind(request.passage_id)
             .bind(&request.soal)
@@ -72,6 +76,16 @@ impl<'c> Table<'c, Soal> {
             .bind(&request.modul)
             .bind(&request.pelajaran)
             .bind(&request.tag)
+            .bind(&request.track_id)
+            .bind(&request.category_id)
+            .bind(&request.subcategory_id)
+            .bind(&request.topic_id)
+            .bind(difficulty_est)
+            .bind(&request.difficulty_calc)
+            .bind(&request.bloom_level)
+            .bind(format)
+            .bind(&request.source)
+            .bind(status)
             .execute(&*self.pool)
             .await?;
 

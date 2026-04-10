@@ -38,6 +38,26 @@ pub struct Soal {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    /// Estimated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_est: String,
+    /// Calculated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_calc: Option<String>,
+    /// Bloom's taxonomy level
+    pub bloom_level: Option<String>,
+    /// Question format: "pg" | "true_false" | "fill_blank" | "essay"
+    pub format: String,
+    /// Source reference
+    pub source: Option<String>,
+    /// Question status: "draft" | "active" | "archived"
+    pub status: String,
+    pub p_value: Option<f64>,
+    pub avg_time_sec: Option<f64>,
+    pub attempt_count: i32,
 }
 
 /// Request payload for creating a new soal
@@ -71,6 +91,17 @@ pub struct CreateSoalRequest {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    pub difficulty_est: Option<String>,
+    pub difficulty_calc: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
@@ -91,6 +122,19 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             modul: row.get("modul"),
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
+            track_id: row.try_get("track_id").unwrap_or(None),
+            category_id: row.try_get("category_id").unwrap_or(None),
+            subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
+            topic_id: row.try_get("topic_id").unwrap_or(None),
+            difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
+            difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
+            bloom_level: row.try_get("bloom_level").unwrap_or(None),
+            format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
+            source: row.try_get("source").unwrap_or(None),
+            status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
+            p_value: row.try_get("p_value").unwrap_or(None),
+            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            attempt_count: row.try_get("attempt_count").unwrap_or(0),
         })
     }
 }
@@ -125,9 +169,29 @@ pub struct AdminSoal {
     /// Module
     pub modul: Option<String>,
     /// Subject/Lesson
-    pub pelajaran: Option<String>,  
+    pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    /// Estimated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_est: String,
+    /// Calculated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_calc: Option<String>,
+    /// Bloom's taxonomy level
+    pub bloom_level: Option<String>,
+    /// Question format: "pg" | "true_false" | "fill_blank" | "essay"
+    pub format: String,
+    /// Source reference
+    pub source: Option<String>,
+    /// Question status: "draft" | "active" | "archived"
+    pub status: String,
+    pub p_value: Option<f64>,
+    pub avg_time_sec: Option<f64>,
+    pub attempt_count: i32,
     /// Creation date
     pub created_at: Option<DateTime<Utc>>,
     /// Last update date
@@ -154,9 +218,22 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             modul: row.get("modul"),
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            usage_count: row.get("usage_count"),
+            track_id: row.try_get("track_id").unwrap_or(None),
+            category_id: row.try_get("category_id").unwrap_or(None),
+            subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
+            topic_id: row.try_get("topic_id").unwrap_or(None),
+            difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
+            difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
+            bloom_level: row.try_get("bloom_level").unwrap_or(None),
+            format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
+            source: row.try_get("source").unwrap_or(None),
+            status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
+            p_value: row.try_get("p_value").unwrap_or(None),
+            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            attempt_count: row.try_get("attempt_count").unwrap_or(0),
+            created_at: row.try_get("created_at").unwrap_or(None),
+            updated_at: row.try_get("updated_at").unwrap_or(None),
+            usage_count: row.try_get("usage_count").unwrap_or(0),
         })
     }
 }
@@ -213,6 +290,17 @@ pub struct UpdateSoalRequest {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    pub difficulty_est: Option<String>,
+    pub difficulty_calc: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
 }
 
 /// Request for bulk importing questions

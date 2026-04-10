@@ -297,12 +297,18 @@ async fn update_question(
     }
 
     let question_type = question_req.question_type.as_deref().unwrap_or("multiple_choice");
+    let difficulty_est = question_req.difficulty_est.as_deref().unwrap_or("medium");
+    let format = question_req.format.as_deref().unwrap_or("pg");
+    let status = question_req.status.as_deref().unwrap_or("draft");
     let result = sqlx::query(
         r#"
         UPDATE dbquizapp.soal
         SET passage_id = ?, soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
             correct_answer = ?, solution = ?, sumberfile = ?, modul = ?,
-            pelajaran = ?, tag = ?, updated_at = NOW()
+            pelajaran = ?, tag = ?,
+            track_id = ?, category_id = ?, subcategory_id = ?, topic_id = ?,
+            difficulty_est = ?, difficulty_calc = ?, bloom_level = ?, format = ?, source = ?, status = ?,
+            updated_at = NOW()
         WHERE id = ?
         "#
     )
@@ -320,6 +326,16 @@ async fn update_question(
     .bind(&question_req.modul)
     .bind(&question_req.pelajaran)
     .bind(&question_req.tag)
+    .bind(&question_req.track_id)
+    .bind(&question_req.category_id)
+    .bind(&question_req.subcategory_id)
+    .bind(&question_req.topic_id)
+    .bind(difficulty_est)
+    .bind(&question_req.difficulty_calc)
+    .bind(&question_req.bloom_level)
+    .bind(format)
+    .bind(&question_req.source)
+    .bind(status)
     .bind(question_id)
     .execute(&*data.context.soal.pool)
     .await;
