@@ -55,9 +55,10 @@ impl<'c> Table<'c, Soal> {
         let question_type = request.question_type.as_deref().unwrap_or("multiple_choice");
         let result = sqlx::query(
             r#"
-            INSERT INTO dbquizapp.soal (soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO dbquizapp.soal (passage_id, soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#)
+            .bind(request.passage_id)
             .bind(&request.soal)
             .bind(question_type)
             .bind(&request.opt1)
