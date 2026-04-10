@@ -33,6 +33,7 @@ pub mod search_controller;
 pub mod question_feedback_controller;
 pub mod leaderboard_controller;
 pub mod taxonomy_controller;
+pub mod admin_alerts_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;
@@ -52,6 +53,7 @@ pub use admin_soal_controller::init as init_admin_soal_controller;
 pub use admin_packages_controller::init as init_admin_packages_controller;
 pub use admin_paket_soal_items_controller::init as init_admin_paket_soal_items_controller;
 pub use admin_analytics_controller::init as init_admin_analytics_controller;
+pub use admin_alerts_controller::init as init_admin_alerts_controller;
 
 // Internal endpoint exports
 pub use internal_soal_controller::init as init_internal_soal_controller;
