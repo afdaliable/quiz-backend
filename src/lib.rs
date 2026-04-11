@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 //use sqlx::MySqlPool;
 
 pub mod config;
+pub mod levels;
 pub mod controller;
 pub mod dao;
 pub mod model;

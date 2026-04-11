@@ -6,10 +6,12 @@ use utoipa::ToSchema;
 use chrono::{DateTime, Utc};
 
 /// Represents a Soal (Question) entity
-#[derive(Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct Soal {
     /// Unique identifier for the soal
     pub id: i32,
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// The question text
     pub soal: String,
     /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
@@ -36,11 +38,33 @@ pub struct Soal {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    /// Estimated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_est: String,
+    /// Calculated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_calc: Option<String>,
+    /// Bloom's taxonomy level
+    pub bloom_level: Option<String>,
+    /// Question format: "pg" | "true_false" | "fill_blank" | "essay"
+    pub format: String,
+    /// Source reference
+    pub source: Option<String>,
+    /// Question status: "draft" | "active" | "archived"
+    pub status: String,
+    pub p_value: Option<f64>,
+    pub avg_time_sec: Option<f64>,
+    pub attempt_count: i32,
 }
 
 /// Request payload for creating a new soal
 #[derive(Debug, Deserialize, Serialize, ToSchema, Clone)]
 pub struct CreateSoalRequest {
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// Question text
     pub soal: String,
     /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
@@ -67,12 +91,26 @@ pub struct CreateSoalRequest {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    pub difficulty_est: Option<String>,
+    pub difficulty_calc: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
+    /// Tag IDs to associate (manages question_tags)
+    pub tag_ids: Option<Vec<String>>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(Soal {
             id: row.get("id"),
+            passage_id: row.try_get("passage_id").unwrap_or(None),
             soal: row.get("soal"),
             question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
             opt1: row.get("opt1"),
@@ -86,6 +124,19 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             modul: row.get("modul"),
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
+            track_id: row.try_get("track_id").unwrap_or(None),
+            category_id: row.try_get("category_id").unwrap_or(None),
+            subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
+            topic_id: row.try_get("topic_id").unwrap_or(None),
+            difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
+            difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
+            bloom_level: row.try_get("bloom_level").unwrap_or(None),
+            format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
+            source: row.try_get("source").unwrap_or(None),
+            status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
+            p_value: row.try_get("p_value").unwrap_or(None),
+            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            attempt_count: row.try_get("attempt_count").unwrap_or(0),
         })
     }
 }
@@ -95,6 +146,8 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
 pub struct AdminSoal {
     /// Unique identifier for the soal
     pub id: i32,
+    /// Optional reference to a shared reading passage
+    pub passage_id: Option<i32>,
     /// The question text
     pub soal: String,
     /// Question type discriminator: "multiple_choice" | "true_false" | "fill_blank"
@@ -118,9 +171,29 @@ pub struct AdminSoal {
     /// Module
     pub modul: Option<String>,
     /// Subject/Lesson
-    pub pelajaran: Option<String>,  
+    pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    /// Estimated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_est: String,
+    /// Calculated difficulty: "easy" | "medium" | "hard"
+    pub difficulty_calc: Option<String>,
+    /// Bloom's taxonomy level
+    pub bloom_level: Option<String>,
+    /// Question format: "pg" | "true_false" | "fill_blank" | "essay"
+    pub format: String,
+    /// Source reference
+    pub source: Option<String>,
+    /// Question status: "draft" | "active" | "archived"
+    pub status: String,
+    pub p_value: Option<f64>,
+    pub avg_time_sec: Option<f64>,
+    pub attempt_count: i32,
     /// Creation date
     pub created_at: Option<DateTime<Utc>>,
     /// Last update date
@@ -133,6 +206,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(AdminSoal {
             id: row.get("id"),
+            passage_id: row.try_get("passage_id").unwrap_or(None),
             soal: row.get("soal"),
             question_type: row.try_get("question_type").unwrap_or_else(|_| "multiple_choice".to_string()),
             opt1: row.get("opt1"),
@@ -146,9 +220,22 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             modul: row.get("modul"),
             pelajaran: row.get("pelajaran"),
             tag: row.get("tag"),
-            created_at: row.get("created_at"),
-            updated_at: row.get("updated_at"),
-            usage_count: row.get("usage_count"),
+            track_id: row.try_get("track_id").unwrap_or(None),
+            category_id: row.try_get("category_id").unwrap_or(None),
+            subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
+            topic_id: row.try_get("topic_id").unwrap_or(None),
+            difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
+            difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
+            bloom_level: row.try_get("bloom_level").unwrap_or(None),
+            format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
+            source: row.try_get("source").unwrap_or(None),
+            status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
+            p_value: row.try_get("p_value").unwrap_or(None),
+            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            attempt_count: row.try_get("attempt_count").unwrap_or(0),
+            created_at: row.try_get("created_at").unwrap_or(None),
+            updated_at: row.try_get("updated_at").unwrap_or(None),
+            usage_count: row.try_get("usage_count").unwrap_or(0),
         })
     }
 }
@@ -156,12 +243,27 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
 /// Request for question search/filtering
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct QuestionSearchRequest {
+    // existing
     pub page: Option<u32>,
     pub limit: Option<u32>,
     pub search: Option<String>,
     pub modul: Option<String>,
     pub pelajaran: Option<String>,
     pub tag: Option<String>,
+    // AFD-204: taxonomy filters (slug-based)
+    pub track: Option<String>,
+    pub category: Option<String>,
+    pub subcategory: Option<String>,
+    pub topic: Option<String>,
+    /// Comma-separated tag slugs
+    pub tags: Option<String>,
+    /// "and" | "or" (default: "or")
+    pub tag_mode: Option<String>,
+    pub difficulty: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
 }
 
 /// Paginated questions response
@@ -177,6 +279,8 @@ pub struct PaginatedQuestionsResponse {
 /// Request for updating a question
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateSoalRequest {
+    /// Optional reference to a shared reading passage (null = unassign)
+    pub passage_id: Option<i32>,
     /// Question text
     pub soal: String,
     /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
@@ -203,6 +307,19 @@ pub struct UpdateSoalRequest {
     pub pelajaran: Option<String>,
     /// Tag
     pub tag: Option<String>,
+    // Taxonomy FK fields
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
+    pub difficulty_est: Option<String>,
+    pub difficulty_calc: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
+    /// Tag IDs to associate (manages question_tags)
+    pub tag_ids: Option<Vec<String>>,
 }
 
 /// Request for bulk importing questions
@@ -252,4 +369,20 @@ pub struct CsvImportError {
     pub message: String,
     pub suggested_fix: Option<String>,
     pub raw_value: Option<String>,
+}
+
+/// Soal with resolved taxonomy context (AFD-204)
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct SoalWithTaxonomy {
+    #[serde(flatten)]
+    pub base: Soal,
+    pub taxonomy: Option<crate::model::taxonomy::TaxonomyContext>,
+}
+
+/// Soal with its associated passage inlined (for quiz session responses)
+#[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
+pub struct SoalWithPassage {
+    #[serde(flatten)]
+    pub soal: Soal,
+    pub passage: Option<crate::model::passage::PassageSummary>,
 }

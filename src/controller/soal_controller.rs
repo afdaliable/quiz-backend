@@ -6,7 +6,8 @@ use actix_web::{get, web, HttpResponse, Responder, HttpRequest};
 use crate::utils::auth::extract_user_id;
 use crate::service::redis_service::RedisService;
 pub fn init(cfg: &mut web::ServiceConfig) {
-    cfg.service(get_soal)
+    cfg.service(list_soal)
+       .service(get_soal)
        .service(get_paket_soal_response)
        .service(get_paket_soal_by_category)
        .service(get_list_paket_soal)
@@ -454,6 +455,84 @@ async fn check_quiz_access(
             }))
         }
     }
+}
+
+// ─── AFD-204: Public soal list with taxonomy filters ────────────────────────
+
+#[derive(serde::Deserialize)]
+struct PublicSoalQuery {
+    page: Option<u32>,
+    limit: Option<u32>,
+    track: Option<String>,
+    category: Option<String>,
+    difficulty: Option<String>,
+    status: Option<String>,
+}
+
+#[get("/soal")]
+async fn list_soal(
+    query: web::Query<PublicSoalQuery>,
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("GET: /soal", &app_state.connections);
+
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(20).min(100);
+    let offset = (page - 1) * limit;
+
+    let mut where_conditions: Vec<&str> = vec!["s.status = 'active'"];
+    let mut bind_values: Vec<String> = vec![];
+
+    // Override status if explicitly provided
+    let status_override;
+    if let Some(ref status) = query.status {
+        where_conditions.clear();
+        status_override = format!("s.status = ?");
+        where_conditions.push(&status_override);
+        bind_values.push(status.clone());
+    }
+
+    if let Some(ref track_slug) = query.track {
+        where_conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
+        bind_values.push(track_slug.clone());
+    }
+    if let Some(ref cat_slug) = query.category {
+        where_conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+        bind_values.push(cat_slug.clone());
+    }
+    if let Some(ref diff) = query.difficulty {
+        where_conditions.push("s.difficulty_est = ?");
+        bind_values.push(diff.clone());
+    }
+
+    let where_clause = where_conditions.join(" AND ");
+
+    let count_sql = format!("SELECT COUNT(*) FROM dbquizapp.soal s WHERE {}", where_clause);
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+    for v in &bind_values { count_q = count_q.bind(v); }
+    let total: i64 = count_q.fetch_one(&*app_state.context.soal.pool).await.unwrap_or(0);
+
+    let list_sql = format!(
+        "SELECT s.*, 0 AS usage_count FROM dbquizapp.soal s WHERE {} ORDER BY s.id DESC LIMIT ? OFFSET ?",
+        where_clause
+    );
+    let mut list_q = sqlx::query_as::<_, crate::model::soal::AdminSoal>(&list_sql);
+    for v in &bind_values { list_q = list_q.bind(v); }
+    let questions = list_q
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&*app_state.context.soal.pool)
+        .await
+        .unwrap_or_default();
+
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+    HttpResponse::Ok().json(serde_json::json!({
+        "questions": questions,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "total_pages": total_pages,
+    }))
 }
 
 // Kode yang dikomentari tetap tidak berubah
