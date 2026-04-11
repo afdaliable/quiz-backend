@@ -31,6 +31,7 @@ pub mod user_preferences;
 pub mod taxonomy;
 pub mod admin_alert;
 pub mod passage;
+pub mod ai_models;
 
 pub type Soal = soal::Soal;
 pub type CreateSoalRequest = soal::CreateSoalRequest;

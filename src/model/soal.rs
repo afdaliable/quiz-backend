@@ -377,6 +377,8 @@ pub struct SoalWithTaxonomy {
     #[serde(flatten)]
     pub base: Soal,
     pub taxonomy: Option<crate::model::taxonomy::TaxonomyContext>,
+}
+
 /// Soal with its associated passage inlined (for quiz session responses)
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct SoalWithPassage {
