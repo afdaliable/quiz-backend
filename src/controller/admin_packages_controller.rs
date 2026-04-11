@@ -1,6 +1,7 @@
 use crate::controller::log_request;
 use crate::middleware::admin_middleware::AdminMiddleware;
-use crate::model::paket_soal::{PaketSoal, AdminPaketSoal, AdminPaketSoalRequest, CreatePaketSoalRequest, UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest, PackageOperationResponse};
+use crate::model::paket_soal::{PaketSoal, AdminPaketSoal, AdminPaketSoalRequest, CreatePaketSoalRequest, UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest, PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix};
+use rand::seq::SliceRandom;
 use crate::model::soal::AdminSoal;
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
@@ -19,6 +20,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .wrap(AdminMiddleware::new())
             .service(get_all_packages)
             .service(create_package)
+            .service(generate_package)
             .service(get_package_by_id)
             .service(update_package)
             .service(delete_package)
@@ -642,6 +644,206 @@ async fn remove_question_from_package(
             })
         }
     }
+}
+
+/// Generate a random package based on difficulty mix and optional taxonomy filters
+#[utoipa::path(
+    post,
+    path = "/admin/packages/generate",
+    request_body = GeneratePackageRequest,
+    responses(
+        (status = 201, description = "Package generated successfully", body = GeneratePackageResponse),
+        (status = 400, description = "Invalid request or not enough questions available"),
+        (status = 403, description = "Admin access required"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+#[post("/generate")]
+async fn generate_package(
+    req: web::Json<GeneratePackageRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/packages/generate", &data.connections);
+
+    let total_needed = req.difficulty_mix.total();
+    if total_needed == 0 {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "difficulty_mix must request at least 1 question total".to_string(),
+        });
+    }
+
+    if req.nama_paket_soal.trim().is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "nama_paket_soal cannot be empty".to_string(),
+        });
+    }
+
+    let pool = &*data.context.soal.pool;
+
+    // Helper: fetch question IDs matching taxonomy + difficulty filters
+    async fn fetch_candidate_ids(
+        pool: &sqlx::MySqlPool,
+        track_slug: Option<&str>,
+        category_slug: Option<&str>,
+        subcategory_slug: Option<&str>,
+        difficulty: &str,
+    ) -> Result<Vec<i32>, sqlx::Error> {
+        let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", "s.difficulty_est = ?"];
+        let mut binds: Vec<String> = vec![difficulty.to_string()];
+
+        if let Some(ts) = track_slug {
+            conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
+            binds.push(ts.to_string());
+        }
+        if let Some(cs) = category_slug {
+            conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+            binds.push(cs.to_string());
+        }
+        if let Some(ss) = subcategory_slug {
+            conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
+            binds.push(ss.to_string());
+        }
+
+        let query = format!(
+            "SELECT s.id FROM soal s WHERE {}",
+            conditions.join(" AND ")
+        );
+
+        let mut q = sqlx::query_scalar::<_, i32>(&query);
+        for b in &binds {
+            q = q.bind(b);
+        }
+        q.fetch_all(pool).await
+    }
+
+    let mut rng = rand::thread_rng();
+    let mut selected_ids: Vec<i32> = Vec::with_capacity(total_needed as usize);
+
+    let difficulties: &[(&str, u32)] = &[
+        ("easy",   req.difficulty_mix.easy.unwrap_or(0)),
+        ("medium", req.difficulty_mix.medium.unwrap_or(0)),
+        ("hard",   req.difficulty_mix.hard.unwrap_or(0)),
+    ];
+
+    for (diff_label, count) in difficulties {
+        if *count == 0 { continue; }
+
+        let candidates = match fetch_candidate_ids(
+            pool,
+            req.track_slug.as_deref(),
+            req.category_slug.as_deref(),
+            req.subcategory_slug.as_deref(),
+            diff_label,
+        ).await {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!("Error fetching {} candidates: {:?}", diff_label, e);
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    error: format!("Failed to query {} questions", diff_label),
+                });
+            }
+        };
+
+        if candidates.len() < *count as usize {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: format!(
+                    "Not enough {} questions available. Requested {}, found {}.",
+                    diff_label, count, candidates.len()
+                ),
+            });
+        }
+
+        let mut shuffled = candidates;
+        shuffled.shuffle(&mut rng);
+        selected_ids.extend_from_slice(&shuffled[..*count as usize]);
+    }
+
+    // Build JSON values for generation_rules and difficulty_mix columns
+    let generation_rules = serde_json::json!({
+        "track_slug": req.track_slug,
+        "category_slug": req.category_slug,
+        "subcategory_slug": req.subcategory_slug,
+    });
+    let difficulty_mix_json = serde_json::json!({
+        "easy":   req.difficulty_mix.easy.unwrap_or(0),
+        "medium": req.difficulty_mix.medium.unwrap_or(0),
+        "hard":   req.difficulty_mix.hard.unwrap_or(0),
+    });
+
+    // Start transaction: insert paket_soal + paket_soal_items atomically
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            eprintln!("Error starting transaction: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to start transaction".to_string(),
+            });
+        }
+    };
+
+    let insert_result = sqlx::query(
+        r#"
+        INSERT INTO paket_soal
+            (nama_paket_soal, is_premium, is_generated, generation_rules, difficulty_mix, created_at, updated_at)
+        VALUES (?, 0, 1, ?, ?, NOW(), NOW())
+        "#
+    )
+    .bind(&req.nama_paket_soal)
+    .bind(generation_rules.to_string())
+    .bind(difficulty_mix_json.to_string())
+    .execute(&mut *tx)
+    .await;
+
+    let paket_soal_id = match insert_result {
+        Ok(r) => r.last_insert_id() as i32,
+        Err(e) => {
+            let _ = tx.rollback().await;
+            eprintln!("Error inserting paket_soal: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to create package record".to_string(),
+            });
+        }
+    };
+
+    for (order, question_id) in selected_ids.iter().enumerate() {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO paket_soal_items (paket_soal_id, soal_id) VALUES (?, ?)"
+        )
+        .bind(paket_soal_id)
+        .bind(question_id)
+        .execute(&mut *tx)
+        .await
+        {
+            let _ = tx.rollback().await;
+            eprintln!("Error inserting item order={} question_id={}: {:?}", order, question_id, e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to insert package questions".to_string(),
+            });
+        }
+    }
+
+    if let Err(e) = tx.commit().await {
+        eprintln!("Error committing generate transaction: {:?}", e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Failed to commit package generation".to_string(),
+        });
+    }
+
+    HttpResponse::Created().json(GeneratePackageResponse {
+        paket_soal_id,
+        nama_paket_soal: req.nama_paket_soal.clone(),
+        total_questions: total_needed,
+        difficulty_mix: DifficultyMix {
+            easy: req.difficulty_mix.easy,
+            medium: req.difficulty_mix.medium,
+            hard: req.difficulty_mix.hard,
+        },
+        selected_question_ids: selected_ids,
+    })
 }
 
 // Helper function to get package by ID
