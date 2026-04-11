@@ -1,6 +1,7 @@
 use crate::controller::log_request;
 use crate::middleware::admin_middleware::AdminMiddleware;
-use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchRequest, PaginatedQuestionsResponse, BulkImportRequest, BulkImportResponse, CreateSoalRequest, CsvImportRequest, CsvImportResponse};
+use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchRequest, PaginatedQuestionsResponse, BulkImportRequest, BulkImportResponse, CreateSoalRequest, CsvImportRequest, CsvImportResponse, SoalWithTaxonomy};
+use crate::dao::taxonomy_dao::TaxonomyDao;
 use crate::service::csv_import_service::{CsvImportService, CsvImportConfig};
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
@@ -91,6 +92,44 @@ async fn search_questions(
     if let Some(ref tag) = query.tag {
         where_conditions.push("s.tag = ?");
         bind_values.push(tag.clone());
+    }
+
+    // AFD-204: taxonomy slug-based filters (JOIN approach)
+    if let Some(ref track_slug) = query.track {
+        where_conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
+        bind_values.push(track_slug.clone());
+    }
+    if let Some(ref cat_slug) = query.category {
+        where_conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+        bind_values.push(cat_slug.clone());
+    }
+    if let Some(ref sub_slug) = query.subcategory {
+        where_conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
+        bind_values.push(sub_slug.clone());
+    }
+    if let Some(ref top_slug) = query.topic {
+        where_conditions.push("EXISTS (SELECT 1 FROM topics tp WHERE tp.id = s.topic_id AND tp.slug = ?)");
+        bind_values.push(top_slug.clone());
+    }
+    if let Some(ref diff) = query.difficulty {
+        where_conditions.push("s.difficulty_est = ?");
+        bind_values.push(diff.clone());
+    }
+    if let Some(ref bloom) = query.bloom_level {
+        where_conditions.push("s.bloom_level = ?");
+        bind_values.push(bloom.clone());
+    }
+    if let Some(ref fmt) = query.format {
+        where_conditions.push("s.format = ?");
+        bind_values.push(fmt.clone());
+    }
+    if let Some(ref src) = query.source {
+        where_conditions.push("s.source = ?");
+        bind_values.push(src.clone());
+    }
+    if let Some(ref status) = query.status {
+        where_conditions.push("s.status = ?");
+        bind_values.push(status.clone());
     }
 
     let where_clause = where_conditions.join(" AND ");
@@ -194,7 +233,7 @@ async fn get_question_by_id(
     let question_id = path.into_inner();
     
     let query = r#"
-        SELECT 
+        SELECT
             s.*,
             COALESCE(s.created_at, NOW()) as created_at,
             COALESCE(s.updated_at, NOW()) as updated_at,
@@ -203,12 +242,19 @@ async fn get_question_by_id(
         WHERE s.id = ?
     "#;
 
-    match sqlx::query_as::<_, AdminSoal>(query)
+    match sqlx::query_as::<_, Soal>(query)
         .bind(question_id)
         .fetch_one(&*data.context.soal.pool)
-        .await 
+        .await
     {
-        Ok(question) => HttpResponse::Ok().json(question),
+        Ok(soal) => {
+            let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
+            let taxonomy = taxonomy_dao.get_taxonomy_context(&soal).await;
+            HttpResponse::Ok().json(SoalWithTaxonomy {
+                base: soal,
+                taxonomy: Some(taxonomy),
+            })
+        }
         Err(e) => {
             println!("Error fetching question: {:?}", e);
             HttpResponse::NotFound().json(ErrorResponse {
@@ -249,7 +295,16 @@ async fn create_question(
     }
 
     match data.context.soal.create_soal(&*question_req).await {
-        Ok(question) => HttpResponse::Created().json(question),
+        Ok(question) => {
+            // Manage question_tags if tag_ids provided
+            if let Some(ref tag_ids) = question_req.tag_ids {
+                let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
+                if let Err(e) = taxonomy_dao.set_question_tags(question.id, tag_ids).await {
+                    eprintln!("Error setting question tags: {:?}", e);
+                }
+            }
+            HttpResponse::Created().json(question)
+        }
         Err(e) => {
             println!("Error creating question: {:?}", e);
             HttpResponse::InternalServerError().json(ErrorResponse {
@@ -297,15 +352,22 @@ async fn update_question(
     }
 
     let question_type = question_req.question_type.as_deref().unwrap_or("multiple_choice");
+    let difficulty_est = question_req.difficulty_est.as_deref().unwrap_or("medium");
+    let format = question_req.format.as_deref().unwrap_or("pg");
+    let status = question_req.status.as_deref().unwrap_or("draft");
     let result = sqlx::query(
         r#"
         UPDATE dbquizapp.soal
-        SET soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
+        SET passage_id = ?, soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
             correct_answer = ?, solution = ?, sumberfile = ?, modul = ?,
-            pelajaran = ?, tag = ?, updated_at = NOW()
+            pelajaran = ?, tag = ?,
+            track_id = ?, category_id = ?, subcategory_id = ?, topic_id = ?,
+            difficulty_est = ?, difficulty_calc = ?, bloom_level = ?, format = ?, source = ?, status = ?,
+            updated_at = NOW()
         WHERE id = ?
         "#
     )
+    .bind(question_req.passage_id)
     .bind(&question_req.soal)
     .bind(question_type)
     .bind(&question_req.opt1)
@@ -319,6 +381,16 @@ async fn update_question(
     .bind(&question_req.modul)
     .bind(&question_req.pelajaran)
     .bind(&question_req.tag)
+    .bind(&question_req.track_id)
+    .bind(&question_req.category_id)
+    .bind(&question_req.subcategory_id)
+    .bind(&question_req.topic_id)
+    .bind(difficulty_est)
+    .bind(&question_req.difficulty_calc)
+    .bind(&question_req.bloom_level)
+    .bind(format)
+    .bind(&question_req.source)
+    .bind(status)
     .bind(question_id)
     .execute(&*data.context.soal.pool)
     .await;
@@ -326,6 +398,13 @@ async fn update_question(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                // Manage question_tags if tag_ids provided
+                if let Some(ref tag_ids) = question_req.tag_ids {
+                    let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
+                    if let Err(e) = taxonomy_dao.set_question_tags(question_id, tag_ids).await {
+                        eprintln!("Error setting question tags: {:?}", e);
+                    }
+                }
                 // Fetch the updated question
                 match data.context.soal.get_soal_by_id(&question_id.to_string()).await {
                     Ok(question) => HttpResponse::Ok().json(question),

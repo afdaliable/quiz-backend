@@ -24,6 +24,13 @@ pub mod question_comment;
 pub mod midtrans;
 pub mod score_history;
 pub mod public_profile;
+pub mod search;
+pub mod question_feedback;
+pub mod xp;
+pub mod user_preferences;
+pub mod taxonomy;
+pub mod admin_alert;
+pub mod passage;
 pub mod ai_models;
 
 pub type Soal = soal::Soal;

@@ -14,6 +14,7 @@ use supabase_auth::models::AuthClient;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 use quiz_backend::docs::ApiDoc;
+use quiz_backend::service::difficulty_service::recalculate_difficulty;
 use std::time::Duration;
 use tokio::time;
 
@@ -71,6 +72,16 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
+    // Background task: recalculate difficulty weekly (AFD-206)
+    let app_state_diff = app_state.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(7 * 24 * 3600));
+        loop {
+            interval.tick().await;
+            recalculate_difficulty(app_state_diff.context.soal.pool.clone()).await;
+        }
+    });
+
     HttpServer::new(move || {
         let cors = Cors::default()
         .allow_any_origin()
@@ -106,11 +117,17 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_admin_packages_controller)
             .configure(controller::init_admin_paket_soal_items_controller)
             .configure(controller::init_admin_analytics_controller)
+            .configure(controller::init_admin_alerts_controller)
+            .configure(controller::init_admin_passage_controller)
             .configure(controller::init_internal_soal_controller)
             .configure(controller::init_question_comment_controller)
             .configure(controller::init_subscription_controller)
             .configure(controller::init_analytics_controller)
             .configure(quiz_backend::controller::public_profile_controller::configure_routes)
+            .configure(quiz_backend::controller::search_controller::configure_routes)
+            .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
+            .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
+            .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

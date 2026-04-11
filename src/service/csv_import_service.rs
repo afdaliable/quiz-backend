@@ -427,6 +427,7 @@ impl CsvImportService {
         // Create question if valid
         let question = if errors.is_empty() {
             Some(CreateSoalRequest {
+                passage_id: None,
                 soal: question_text,
                 question_type: None, // defaults to "multiple_choice" in DAO
                 opt1,
@@ -440,6 +441,17 @@ impl CsvImportService {
                 modul: if modul.is_empty() { None } else { Some(modul) },
                 pelajaran: if pelajaran.is_empty() { None } else { Some(pelajaran) },
                 tag: if tag.is_empty() { None } else { Some(tag) },
+                track_id: None,
+                category_id: None,
+                subcategory_id: None,
+                topic_id: None,
+                difficulty_est: None,
+                difficulty_calc: None,
+                bloom_level: None,
+                format: None,
+                source: None,
+                status: None,
+                tag_ids: None,
             })
         } else {
             None
