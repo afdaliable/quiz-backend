@@ -2,6 +2,19 @@ use serde::Deserialize;
 use std::fs;
 
 #[derive(Deserialize, Clone)]
+pub struct AiConfig {
+    pub primary_provider: String,
+    pub deepseek_api_key: String,
+    pub deepseek_model: String,
+    pub gemini_api_key: String,
+    pub gemini_model: String,
+    pub fallback_enabled: bool,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub timeout_secs: u64,
+}
+
+#[derive(Deserialize, Clone)]
 struct AppConfig {
     url: String,
     port: u16,
@@ -61,6 +74,8 @@ pub struct Config {
     internal_api_key: Option<String>,
     #[serde(default)]
     midtrans: MidtransConfig,
+    #[serde(default)]
+    ai: Option<AiConfig>,
 }
 
 impl Config {
@@ -158,5 +173,9 @@ impl Config {
 
     pub fn get_midtrans_is_production(&self) -> bool {
         self.midtrans.is_production
+    }
+
+    pub fn get_ai_config(&self) -> Option<&AiConfig> {
+        self.ai.as_ref()
     }
 }

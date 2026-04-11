@@ -6,6 +6,7 @@ use quiz_backend::config::Config;
 use quiz_backend::dao::Database;
 use quiz_backend::{controller, AppState};
 use quiz_backend::service::redis_service::RedisPool;
+use quiz_backend::service::ai_service::AiService;
 use supabase_auth::models::SignUpWithPasswordOptions;
 use std::sync::{Arc, Mutex};
 use http::header;
@@ -48,6 +49,19 @@ async fn main() -> std::io::Result<()> {
         }
     };
 
+    let ai_service = match AiService::from_config(&config) {
+        Some(svc) => {
+            println!("AI service initialized (provider: {})", config.get_ai_config()
+                .map(|c| c.primary_provider.as_str())
+                .unwrap_or("unknown"));
+            Some(Arc::new(svc))
+        }
+        None => {
+            println!("AI service not configured (no 'ai' section in config.json) — AI features disabled");
+            None
+        }
+    };
+
     let app_state = web::Data::new(AppState {
         connections: Mutex::new(0),
         context: Arc::new(db_context),
@@ -55,6 +69,7 @@ async fn main() -> std::io::Result<()> {
         auth_client,
         sign_up_with_password_options: SignUpWithPasswordOptions::default(),
         redis_pool,
+        ai_service,
     });
 
     let app_url = config.get_app_url();
