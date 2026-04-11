@@ -102,6 +102,8 @@ pub struct CreateSoalRequest {
     pub format: Option<String>,
     pub source: Option<String>,
     pub status: Option<String>,
+    /// Tag IDs to associate (manages question_tags)
+    pub tag_ids: Option<Vec<String>>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
@@ -241,12 +243,27 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
 /// Request for question search/filtering
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct QuestionSearchRequest {
+    // existing
     pub page: Option<u32>,
     pub limit: Option<u32>,
     pub search: Option<String>,
     pub modul: Option<String>,
     pub pelajaran: Option<String>,
     pub tag: Option<String>,
+    // AFD-204: taxonomy filters (slug-based)
+    pub track: Option<String>,
+    pub category: Option<String>,
+    pub subcategory: Option<String>,
+    pub topic: Option<String>,
+    /// Comma-separated tag slugs
+    pub tags: Option<String>,
+    /// "and" | "or" (default: "or")
+    pub tag_mode: Option<String>,
+    pub difficulty: Option<String>,
+    pub bloom_level: Option<String>,
+    pub format: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
 }
 
 /// Paginated questions response
@@ -301,6 +318,8 @@ pub struct UpdateSoalRequest {
     pub format: Option<String>,
     pub source: Option<String>,
     pub status: Option<String>,
+    /// Tag IDs to associate (manages question_tags)
+    pub tag_ids: Option<Vec<String>>,
 }
 
 /// Request for bulk importing questions
@@ -352,6 +371,12 @@ pub struct CsvImportError {
     pub raw_value: Option<String>,
 }
 
+/// Soal with resolved taxonomy context (AFD-204)
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct SoalWithTaxonomy {
+    #[serde(flatten)]
+    pub base: Soal,
+    pub taxonomy: Option<crate::model::taxonomy::TaxonomyContext>,
 /// Soal with its associated passage inlined (for quiz session responses)
 #[derive(Debug, Serialize, Deserialize, ToSchema, Clone)]
 pub struct SoalWithPassage {

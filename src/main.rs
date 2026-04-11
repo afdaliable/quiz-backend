@@ -115,6 +115,7 @@ async fn main() -> std::io::Result<()> {
             .configure(quiz_backend::controller::search_controller::configure_routes)
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
+            .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),

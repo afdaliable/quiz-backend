@@ -33,6 +33,7 @@ pub mod public_profile_controller;
 pub mod search_controller;
 pub mod question_feedback_controller;
 pub mod leaderboard_controller;
+pub mod taxonomy_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;

@@ -451,6 +451,7 @@ impl CsvImportService {
                 format: None,
                 source: None,
                 status: None,
+                tag_ids: None,
             })
         } else {
             None
