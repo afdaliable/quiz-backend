@@ -58,10 +58,11 @@ impl<'c> Table<'c, Soal> {
         let status = request.status.as_deref().unwrap_or("draft");
         let result = sqlx::query(
             r#"
-            INSERT INTO dbquizapp.soal (soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag,
+            INSERT INTO dbquizapp.soal (passage_id, soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, sumberfile, modul, pelajaran, tag,
                 track_id, category_id, subcategory_id, topic_id, difficulty_est, difficulty_calc, bloom_level, format, source, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#)
+            .bind(request.passage_id)
             .bind(&request.soal)
             .bind(question_type)
             .bind(&request.opt1)
