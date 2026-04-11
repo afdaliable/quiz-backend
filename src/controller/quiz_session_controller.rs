@@ -5,6 +5,7 @@ use crate::model::{
 };
 use crate::model::xp::{XpBreakdownResponse, XpAwardResultResponse, CompleteSessionWithXpResponse};
 use crate::service::xp_service::{compute_quiz_xp, award_quiz_xp};
+use crate::service::difficulty_service::upsert_question_stats;
 use crate::AppState;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 
@@ -143,6 +144,36 @@ pub async fn complete_quiz_session(
 
     match state.context.quiz_sessions.complete_quiz_session(&session_id, user_id, &req).await {
         Ok(session) => {
+            // Fire-and-forget: update question_attempt_stats (AFD-206)
+            {
+                let pool = state.context.soal.pool.clone();
+                let answers = req.answers.clone();
+                let time_spent = session.total_time.unwrap_or(0)
+                    - session.time_remaining.unwrap_or(0);
+
+                // Determine question_ids: explicit for random, or from paket_soal_items for standard
+                let q_ids_json = session.question_ids.clone();
+                let paket_soal_id = session.paket_soal_id;
+
+                tokio::spawn(async move {
+                    let question_ids: Vec<i32> = if let Some(json) = q_ids_json {
+                        serde_json::from_str(&json).unwrap_or_default()
+                    } else if let Some(pkg_id) = paket_soal_id {
+                        sqlx::query_scalar::<_, i32>(
+                            "SELECT soal_id FROM paket_soal_items WHERE paket_soal_id = ? ORDER BY id ASC"
+                        )
+                        .bind(pkg_id)
+                        .fetch_all(&*pool)
+                        .await
+                        .unwrap_or_default()
+                    } else {
+                        vec![]
+                    };
+
+                    upsert_question_stats(pool, question_ids, answers, time_spent).await;
+                });
+            }
+
             // Award XP — never fail the quiz request if XP fails
             let is_study_mode = session.session_type == "study";
             let breakdown = compute_quiz_xp(session.score, session.correct_answers, is_study_mode);

@@ -29,6 +29,7 @@ pub mod question_feedback;
 pub mod xp;
 pub mod user_preferences;
 pub mod taxonomy;
+pub mod admin_alert;
 pub mod passage;
 
 pub type Soal = soal::Soal;

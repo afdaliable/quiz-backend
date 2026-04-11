@@ -4,3 +4,4 @@ pub mod redis_service;
 pub mod csv_import_service;
 pub mod midtrans_service;
 pub mod xp_service;
+pub mod difficulty_service;
