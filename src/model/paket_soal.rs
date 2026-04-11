@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
 use utoipa::ToSchema;
@@ -113,4 +114,48 @@ pub struct UpdatePaketSoalRequest {
     pub nama_paket_soal: String,
     pub kategori_id: Option<i32>,
     pub is_premium: bool,
+}
+
+/// Difficulty distribution for generated packages
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct DifficultyMix {
+    /// Number of easy questions (default: 0)
+    pub easy: Option<u32>,
+    /// Number of medium questions (default: 0)
+    pub medium: Option<u32>,
+    /// Number of hard questions (default: 0)
+    pub hard: Option<u32>,
+}
+
+impl DifficultyMix {
+    pub fn total(&self) -> u32 {
+        self.easy.unwrap_or(0) + self.medium.unwrap_or(0) + self.hard.unwrap_or(0)
+    }
+}
+
+/// Request for generating a random package
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct GeneratePackageRequest {
+    /// Package name
+    pub nama_paket_soal: String,
+    /// Filter by exam track slug (e.g. "skd", "snbt")
+    pub track_slug: Option<String>,
+    /// Filter by category slug (optional, narrows within track)
+    pub category_slug: Option<String>,
+    /// Filter by subcategory slug (optional)
+    pub subcategory_slug: Option<String>,
+    /// Distribution of questions per difficulty level
+    pub difficulty_mix: DifficultyMix,
+    /// Duration in minutes (default: 90)
+    pub duration_min: Option<i32>,
+}
+
+/// Response for generate package endpoint
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GeneratePackageResponse {
+    pub paket_soal_id: i32,
+    pub nama_paket_soal: String,
+    pub total_questions: u32,
+    pub difficulty_mix: DifficultyMix,
+    pub selected_question_ids: Vec<i32>,
 }
