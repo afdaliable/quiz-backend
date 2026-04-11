@@ -36,6 +36,9 @@ pub mod leaderboard_controller;
 pub mod taxonomy_controller;
 pub mod admin_alerts_controller;
 
+// AI enrichment controller (admin-only)
+pub mod ai_controller;
+
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;
 pub use soal_controller::init as init_soal_controller;
@@ -63,6 +66,7 @@ pub use internal_soal_controller::init as init_internal_soal_controller;
 pub use question_comment_controller::init as init_question_comment_controller;
 pub use subscription_controller::init as init_subscription_controller;
 pub use analytics_controller::init as init_analytics_controller;
+pub use ai_controller::init as init_ai_controller;
 
 fn log_request(route: &'static str, connections: &Mutex<u32>) {
     let mut con = connections.lock().unwrap();
