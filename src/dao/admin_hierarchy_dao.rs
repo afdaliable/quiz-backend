@@ -27,12 +27,20 @@ impl AdminHierarchyDao {
     // ── Tracks ────────────────────────────────────────────────────────────────
 
     pub async fn get_tracks(&self) -> Result<Vec<ExamTrack>, sqlx::Error> {
+        // AFD-226: count includes direct FK + questions via question_topics M2M
         sqlx::query_as::<_, ExamTrack>(r#"
             SELECT t.id, t.slug, t.name, t.icon, t.status, t.sort_order,
-                   COUNT(s.id) AS question_count
+                   (SELECT COUNT(DISTINCT s.id) FROM soal s
+                    WHERE s.track_id = t.id
+                       OR s.id IN (
+                           SELECT qt.question_id FROM question_topics qt
+                           JOIN topics tp ON tp.id = qt.topic_id
+                           JOIN subcategories sc ON sc.id = tp.subcategory_id
+                           JOIN categories c ON c.id = sc.category_id
+                           WHERE c.track_id = t.id
+                       )
+                   ) AS question_count
             FROM exam_tracks t
-            LEFT JOIN soal s ON s.track_id = t.id
-            GROUP BY t.id, t.slug, t.name, t.icon, t.status, t.sort_order
             ORDER BY t.sort_order
         "#)
         .fetch_all(&*self.pool)
@@ -453,14 +461,16 @@ impl AdminHierarchyDao {
     // ── Topics ────────────────────────────────────────────────────────────────
 
     pub async fn get_topics(&self, subcategory_id: Option<&str>) -> Result<Vec<Topic>, sqlx::Error> {
+        // AFD-226: count includes direct FK + questions via question_topics M2M
         if let Some(sid) = subcategory_id {
             sqlx::query_as::<_, Topic>(r#"
                 SELECT tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order,
-                       COUNT(s.id) AS question_count
+                       (SELECT COUNT(DISTINCT s.id) FROM soal s
+                        WHERE s.topic_id = tp.id
+                           OR s.id IN (SELECT question_id FROM question_topics WHERE topic_id = tp.id)
+                       ) AS question_count
                 FROM topics tp
-                LEFT JOIN soal s ON s.topic_id = tp.id
                 WHERE tp.subcategory_id = ?
-                GROUP BY tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order
                 ORDER BY tp.sort_order
             "#)
             .bind(sid)
@@ -469,10 +479,11 @@ impl AdminHierarchyDao {
         } else {
             sqlx::query_as::<_, Topic>(r#"
                 SELECT tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order,
-                       COUNT(s.id) AS question_count
+                       (SELECT COUNT(DISTINCT s.id) FROM soal s
+                        WHERE s.topic_id = tp.id
+                           OR s.id IN (SELECT question_id FROM question_topics WHERE topic_id = tp.id)
+                       ) AS question_count
                 FROM topics tp
-                LEFT JOIN soal s ON s.topic_id = tp.id
-                GROUP BY tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order
                 ORDER BY tp.sort_order
             "#)
             .fetch_all(&*self.pool)

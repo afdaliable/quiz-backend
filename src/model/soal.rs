@@ -43,6 +43,9 @@ pub struct Soal {
     pub category_id: Option<String>,
     pub subcategory_id: Option<String>,
     pub topic_id: Option<String>,
+    /// Additional topic IDs from question_topics M2M table (AFD-226)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_ids: Option<Vec<String>>,
     /// Estimated difficulty: "easy" | "medium" | "hard"
     pub difficulty_est: String,
     /// Calculated difficulty: "easy" | "medium" | "hard"
@@ -104,6 +107,8 @@ pub struct CreateSoalRequest {
     pub status: Option<String>,
     /// Tag IDs to associate (manages question_tags)
     pub tag_ids: Option<Vec<String>>,
+    /// Additional topic IDs to associate via question_topics M2M (AFD-226)
+    pub topic_ids: Option<Vec<String>>,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for Soal {
@@ -128,6 +133,7 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             category_id: row.try_get("category_id").unwrap_or(None),
             subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
             topic_id: row.try_get("topic_id").unwrap_or(None),
+            topic_ids: None, // populated separately via get_topics_for_question
             difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
             difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
             bloom_level: row.try_get("bloom_level").unwrap_or(None),
@@ -179,6 +185,9 @@ pub struct AdminSoal {
     pub category_id: Option<String>,
     pub subcategory_id: Option<String>,
     pub topic_id: Option<String>,
+    /// Additional topic IDs from question_topics M2M table (AFD-226)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic_ids: Option<Vec<String>>,
     /// Estimated difficulty: "easy" | "medium" | "hard"
     pub difficulty_est: String,
     /// Calculated difficulty: "easy" | "medium" | "hard"
@@ -224,6 +233,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             category_id: row.try_get("category_id").unwrap_or(None),
             subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
             topic_id: row.try_get("topic_id").unwrap_or(None),
+            topic_ids: None, // populated separately via get_topics_for_question
             difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
             difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
             bloom_level: row.try_get("bloom_level").unwrap_or(None),
@@ -320,6 +330,8 @@ pub struct UpdateSoalRequest {
     pub status: Option<String>,
     /// Tag IDs to associate (manages question_tags)
     pub tag_ids: Option<Vec<String>>,
+    /// Additional topic IDs to associate via question_topics M2M (AFD-226)
+    pub topic_ids: Option<Vec<String>>,
 }
 
 /// Request for bulk importing questions

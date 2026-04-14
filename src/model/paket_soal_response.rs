@@ -44,6 +44,7 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
                 category_id: row.try_get("category_id").unwrap_or(None),
                 subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
                 topic_id: row.try_get("topic_id").unwrap_or(None),
+                topic_ids: None,
                 difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
                 difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
                 bloom_level: row.try_get("bloom_level").unwrap_or(None),

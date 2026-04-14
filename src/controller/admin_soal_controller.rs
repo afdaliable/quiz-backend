@@ -108,7 +108,12 @@ async fn search_questions(
         bind_values.push(sub_slug.clone());
     }
     if let Some(ref top_slug) = query.topic {
-        where_conditions.push("EXISTS (SELECT 1 FROM topics tp WHERE tp.id = s.topic_id AND tp.slug = ?)");
+        // AFD-226: match direct FK OR via question_topics M2M
+        where_conditions.push(
+            "(EXISTS (SELECT 1 FROM topics tp WHERE tp.id = s.topic_id AND tp.slug = ?) \
+             OR EXISTS (SELECT 1 FROM question_topics qt JOIN topics tp ON tp.id = qt.topic_id WHERE qt.question_id = s.id AND tp.slug = ?))"
+        );
+        bind_values.push(top_slug.clone());
         bind_values.push(top_slug.clone());
     }
     if let Some(ref diff) = query.difficulty {
@@ -296,11 +301,17 @@ async fn create_question(
 
     match data.context.soal.create_soal(&*question_req).await {
         Ok(question) => {
+            let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
             // Manage question_tags if tag_ids provided
             if let Some(ref tag_ids) = question_req.tag_ids {
-                let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
                 if let Err(e) = taxonomy_dao.set_question_tags(question.id, tag_ids).await {
                     eprintln!("Error setting question tags: {:?}", e);
+                }
+            }
+            // AFD-226: Manage question_topics if topic_ids provided
+            if let Some(ref topic_ids) = question_req.topic_ids {
+                if let Err(e) = taxonomy_dao.set_question_topics(question.id, topic_ids).await {
+                    eprintln!("Error setting question topics: {:?}", e);
                 }
             }
             HttpResponse::Created().json(question)
@@ -398,11 +409,17 @@ async fn update_question(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
                 // Manage question_tags if tag_ids provided
                 if let Some(ref tag_ids) = question_req.tag_ids {
-                    let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
                     if let Err(e) = taxonomy_dao.set_question_tags(question_id, tag_ids).await {
                         eprintln!("Error setting question tags: {:?}", e);
+                    }
+                }
+                // AFD-226: Manage question_topics if topic_ids provided
+                if let Some(ref topic_ids) = question_req.topic_ids {
+                    if let Err(e) = taxonomy_dao.set_question_topics(question_id, topic_ids).await {
+                        eprintln!("Error setting question topics: {:?}", e);
                     }
                 }
                 // Fetch the updated question

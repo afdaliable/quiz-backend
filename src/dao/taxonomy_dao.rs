@@ -217,4 +217,35 @@ impl TaxonomyDao {
 
         Ok(())
     }
+
+    // ── AFD-226: question_topics M2M ─────────────────────────────────────────
+
+    /// Return all topic IDs associated with a question via question_topics table
+    pub async fn get_topics_for_question(&self, question_id: i32) -> Result<Vec<String>, sqlx::Error> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT topic_id FROM question_topics WHERE question_id = ? ORDER BY topic_id"
+        )
+        .bind(question_id)
+        .fetch_all(&*self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
+
+    /// Replace all topic associations for a question (delete + insert pattern, mirrors set_question_tags)
+    pub async fn set_question_topics(&self, question_id: i32, topic_ids: &[String]) -> Result<(), sqlx::Error> {
+        sqlx::query("DELETE FROM question_topics WHERE question_id = ?")
+            .bind(question_id)
+            .execute(&*self.pool)
+            .await?;
+
+        for topic_id in topic_ids {
+            sqlx::query("INSERT IGNORE INTO question_topics (question_id, topic_id) VALUES (?, ?)")
+                .bind(question_id)
+                .bind(topic_id)
+                .execute(&*self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
 }
