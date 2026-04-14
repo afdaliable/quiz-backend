@@ -233,7 +233,10 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             category_id: row.try_get("category_id").unwrap_or(None),
             subcategory_id: row.try_get("subcategory_id").unwrap_or(None),
             topic_id: row.try_get("topic_id").unwrap_or(None),
-            topic_ids: None, // populated separately via get_topics_for_question
+            topic_ids: {
+                let csv: Option<String> = row.try_get("topic_ids_csv").ok().flatten();
+                csv.map(|s| s.split(',').filter(|id| !id.is_empty()).map(|id| id.to_string()).collect())
+            },
             difficulty_est: row.try_get("difficulty_est").unwrap_or_else(|_| "medium".to_string()),
             difficulty_calc: row.try_get("difficulty_calc").unwrap_or(None),
             bloom_level: row.try_get("bloom_level").unwrap_or(None),

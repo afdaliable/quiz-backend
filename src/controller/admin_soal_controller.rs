@@ -163,14 +163,16 @@ async fn search_questions(
         }
     };
 
-    // Get questions
+    // Get questions (AFD-226: include topic_ids_csv via correlated subquery)
     let questions_query = format!(
         r#"
-        SELECT 
+        SELECT
             s.*,
             COALESCE(s.created_at, NOW()) as created_at,
             COALESCE(s.updated_at, NOW()) as updated_at,
-            0 as usage_count
+            0 as usage_count,
+            (SELECT GROUP_CONCAT(DISTINCT qt.topic_id ORDER BY qt.topic_id SEPARATOR ',')
+             FROM question_topics qt WHERE qt.question_id = s.id) AS topic_ids_csv
         FROM dbquizapp.soal s
         WHERE {}
         ORDER BY s.id DESC
