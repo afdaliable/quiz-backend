@@ -254,9 +254,12 @@ async fn get_question_by_id(
         .fetch_one(&*data.context.soal.pool)
         .await
     {
-        Ok(soal) => {
+        Ok(mut soal) => {
             let taxonomy_dao = TaxonomyDao::new(data.context.soal.pool.clone());
             let taxonomy = taxonomy_dao.get_taxonomy_context(&soal).await;
+            // AFD-226: populate topic_ids from question_topics M2M
+            let topic_ids = taxonomy_dao.get_topics_for_question(soal.id).await.unwrap_or_default();
+            soal.topic_ids = if topic_ids.is_empty() { None } else { Some(topic_ids) };
             HttpResponse::Ok().json(SoalWithTaxonomy {
                 base: soal,
                 taxonomy: Some(taxonomy),
@@ -426,7 +429,12 @@ async fn update_question(
                 }
                 // Fetch the updated question
                 match data.context.soal.get_soal_by_id(&question_id.to_string()).await {
-                    Ok(question) => HttpResponse::Ok().json(question),
+                    Ok(mut question) => {
+                        // AFD-226: populate topic_ids from question_topics M2M
+                        let topic_ids = taxonomy_dao.get_topics_for_question(question.id).await.unwrap_or_default();
+                        question.topic_ids = if topic_ids.is_empty() { None } else { Some(topic_ids) };
+                        HttpResponse::Ok().json(question)
+                    }
                     Err(e) => {
                         println!("Error fetching updated question: {:?}", e);
                         HttpResponse::InternalServerError().json(ErrorResponse {
