@@ -360,32 +360,50 @@ async fn update_question(
 
     let question_id = path.into_inner();
 
-    // Validate question data
-    if question_req.soal.trim().is_empty() {
-        return HttpResponse::BadRequest().json(ErrorResponse {
-            error: "Question text cannot be empty".to_string(),
-        });
+    // Validate question text only if provided
+    if let Some(ref soal) = question_req.soal {
+        if soal.trim().is_empty() {
+            return HttpResponse::BadRequest().json(ErrorResponse {
+                error: "Question text cannot be empty".to_string(),
+            });
+        }
     }
 
-    let question_type = question_req.question_type.as_deref().unwrap_or("multiple_choice");
-    let difficulty_est = question_req.difficulty_est.as_deref().unwrap_or("medium");
-    let format = question_req.format.as_deref().unwrap_or("pg");
-    let status = question_req.status.as_deref().unwrap_or("draft");
+    // COALESCE keeps existing DB value when the field is not sent (None/null).
     let result = sqlx::query(
         r#"
         UPDATE dbquizapp.soal
-        SET passage_id = ?, soal = ?, question_type = ?, opt1 = ?, opt2 = ?, opt3 = ?, opt4 = ?, opt5 = ?,
-            correct_answer = ?, solution = ?, sumberfile = ?, modul = ?,
-            pelajaran = ?, tag = ?,
-            track_id = ?, category_id = ?, subcategory_id = ?, topic_id = ?,
-            difficulty_est = ?, difficulty_calc = ?, bloom_level = ?, format = ?, source = ?, status = ?,
+        SET passage_id = ?,
+            soal = COALESCE(?, soal),
+            question_type = COALESCE(?, question_type),
+            opt1 = COALESCE(?, opt1),
+            opt2 = COALESCE(?, opt2),
+            opt3 = COALESCE(?, opt3),
+            opt4 = COALESCE(?, opt4),
+            opt5 = COALESCE(?, opt5),
+            correct_answer = COALESCE(?, correct_answer),
+            solution = COALESCE(?, solution),
+            sumberfile = COALESCE(?, sumberfile),
+            modul = COALESCE(?, modul),
+            pelajaran = COALESCE(?, pelajaran),
+            tag = COALESCE(?, tag),
+            track_id = COALESCE(?, track_id),
+            category_id = COALESCE(?, category_id),
+            subcategory_id = COALESCE(?, subcategory_id),
+            topic_id = COALESCE(?, topic_id),
+            difficulty_est = COALESCE(?, difficulty_est),
+            difficulty_calc = COALESCE(?, difficulty_calc),
+            bloom_level = COALESCE(?, bloom_level),
+            format = COALESCE(?, format),
+            source = COALESCE(?, source),
+            status = COALESCE(?, status),
             updated_at = NOW()
         WHERE id = ?
         "#
     )
     .bind(question_req.passage_id)
     .bind(&question_req.soal)
-    .bind(question_type)
+    .bind(&question_req.question_type)
     .bind(&question_req.opt1)
     .bind(&question_req.opt2)
     .bind(&question_req.opt3)
@@ -401,12 +419,12 @@ async fn update_question(
     .bind(&question_req.category_id)
     .bind(&question_req.subcategory_id)
     .bind(&question_req.topic_id)
-    .bind(difficulty_est)
+    .bind(&question_req.difficulty_est)
     .bind(&question_req.difficulty_calc)
     .bind(&question_req.bloom_level)
-    .bind(format)
+    .bind(&question_req.format)
     .bind(&question_req.source)
-    .bind(status)
+    .bind(&question_req.status)
     .bind(question_id)
     .execute(&*data.context.soal.pool)
     .await;
