@@ -289,29 +289,30 @@ pub struct PaginatedQuestionsResponse {
     pub total_pages: u32,
 }
 
-/// Request for updating a question
+/// Request for updating a question.
+/// All content fields are optional — omitted fields keep their existing DB value via COALESCE.
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct UpdateSoalRequest {
     /// Optional reference to a shared reading passage (null = unassign)
     pub passage_id: Option<i32>,
     /// Question text
-    pub soal: String,
+    pub soal: Option<String>,
     /// Question type: "multiple_choice" | "true_false" | "fill_blank" (default: "multiple_choice")
     pub question_type: Option<String>,
     /// First option
-    pub opt1: String,
+    pub opt1: Option<String>,
     /// Second option
-    pub opt2: String,
+    pub opt2: Option<String>,
     /// Third option
-    pub opt3: String,
+    pub opt3: Option<String>,
     /// Fourth option
-    pub opt4: String,
+    pub opt4: Option<String>,
     /// Fifth option
-    pub opt5: String,
+    pub opt5: Option<String>,
     /// The correct answer
-    pub correct_answer: String,
+    pub correct_answer: Option<String>,
     /// Solution explanation
-    pub solution: String,
+    pub solution: Option<String>,
     /// Source file
     pub sumberfile: Option<String>,
     /// Module
