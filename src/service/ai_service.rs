@@ -100,7 +100,8 @@ struct DeepSeekRequest {
     model: String,
     messages: Vec<DeepSeekMessage>,
     max_tokens: u32,
-    temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
 }
 
 #[derive(Deserialize)]
@@ -128,6 +129,13 @@ struct DeepSeekResponse {
 #[async_trait]
 impl AiProvider for DeepSeekProvider {
     async fn complete(&self, prompt: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError> {
+        // deepseek-reasoner does not support the temperature parameter
+        let temperature = if self.model == "deepseek-reasoner" {
+            None
+        } else {
+            Some(self.temperature)
+        };
+
         let body = DeepSeekRequest {
             model: self.model.clone(),
             messages: vec![DeepSeekMessage {
@@ -135,7 +143,7 @@ impl AiProvider for DeepSeekProvider {
                 content: prompt.to_string(),
             }],
             max_tokens,
-            temperature: self.temperature,
+            temperature,
         };
 
         let resp = self
