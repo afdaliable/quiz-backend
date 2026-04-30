@@ -1,6 +1,7 @@
 mod middleware;
 
 use actix_web::{web, App, HttpServer};
+use actix_files as afiles;
 use actix_cors::Cors;
 use quiz_backend::config::Config;
 use quiz_backend::dao::Database;
@@ -75,6 +76,12 @@ async fn main() -> std::io::Result<()> {
     let app_url = config.get_app_url();
     let jwt_secret = config.get_jwt_secret().to_string();
 
+    // Create upload directory on startup
+    let soal_images_dir = format!("{}/soal-images", config.get_upload_dir());
+    std::fs::create_dir_all(&soal_images_dir)
+        .expect("Failed to create soal-images upload directory");
+    println!("Upload directory: {}", soal_images_dir);
+
     // Background task: clean up expired sessions every hour
     let app_state_clone = app_state.clone();
     tokio::spawn(async move {
@@ -145,6 +152,10 @@ async fn main() -> std::io::Result<()> {
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
+            .service(
+                afiles::Files::new("/static/soal-images", soal_images_dir.clone())
+                    .use_last_modified(true)
+            )
             .service(
                 SwaggerUi::new("/swagger-ui/{_:.*}")
                     .url("/api-docs/openapi.json", ApiDoc::openapi()),
