@@ -1034,6 +1034,9 @@ async fn upload_image(
 
         // Validate MIME type
         let mime = field.content_type().cloned();
+        // NOTE: MIME type comes from the multipart Content-Type header and can be
+        // spoofed by the client. This is acceptable because the endpoint is
+        // admin-only (protected by AdminMiddleware).
         let ext = match mime.as_ref().map(|m| m.essence_str()) {
             Some("image/jpeg") => "jpg",
             Some("image/png") => "png",
@@ -1069,8 +1072,16 @@ async fn upload_image(
     let filename = format!("{}.{}", Uuid::new_v4(), file_ext);
     let file_path = format!("{}/{}", image_dir, filename);
 
-    if let Err(e) = std::fs::write(&file_path, &file_bytes) {
-        eprintln!("Failed to write image: {:?}", e);
+    // Defensive: ensure directory exists even if it was deleted at runtime
+    if let Err(e) = tokio::fs::create_dir_all(&image_dir).await {
+        eprintln!("Failed to create image dir '{}': {:?}", image_dir, e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Gagal menyiapkan direktori upload.".to_string(),
+        });
+    }
+
+    if let Err(e) = tokio::fs::write(&file_path, &file_bytes).await {
+        eprintln!("Failed to write image '{}': {:?}", file_path, e);
         return HttpResponse::InternalServerError().json(ErrorResponse {
             error: "Gagal menyimpan gambar.".to_string(),
         });
