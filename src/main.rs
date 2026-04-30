@@ -79,7 +79,7 @@ async fn main() -> std::io::Result<()> {
     // Create upload directory on startup
     let soal_images_dir = format!("{}/soal-images", config.get_upload_dir());
     std::fs::create_dir_all(&soal_images_dir)
-        .expect("Failed to create soal-images upload directory");
+        .map_err(|e| std::io::Error::new(e.kind(), format!("Failed to create soal-images upload directory '{}': {}", soal_images_dir, e)))?;
     println!("Upload directory: {}", soal_images_dir);
 
     // Background task: clean up expired sessions every hour
