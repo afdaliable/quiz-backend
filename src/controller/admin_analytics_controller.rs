@@ -127,7 +127,7 @@ async fn get_dashboard_stats(
             (SELECT COUNT(*) FROM dbquizapp.soal) as total_questions,
             (SELECT COUNT(*) FROM dbquizapp.paket_soal) as total_packages,
             (SELECT COUNT(*) FROM dbquizapp.kategori_soal) as total_categories,
-            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE status = 'in_progress') as active_sessions,
+            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE is_completed = 0) as active_sessions,
             (SELECT COUNT(*) FROM dbquizapp.user_subscriptions WHERE status = 'active' AND (end_date IS NULL OR end_date > NOW())) as premium_subscriptions,
             COALESCE((SELECT SUM(pp.price) FROM dbquizapp.user_subscriptions us 
                      JOIN dbquizapp.premium_plans pp ON us.plan_id = pp.id 
@@ -216,10 +216,10 @@ async fn get_user_analytics(
     // Get daily growth for last 30 days
     let users_growth_chart = match sqlx::query_as::<_, DailyGrowth>(
         r#"
-        SELECT DATE(created_at) as date, COUNT(*) as count 
-        FROM dbquizapp.users 
+        SELECT DATE_FORMAT(created_at, '%Y-%m-%d') as date, COUNT(*) as count
+        FROM dbquizapp.users
         WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) AND deleted_at IS NULL
-        GROUP BY DATE(created_at) 
+        GROUP BY DATE_FORMAT(created_at, '%Y-%m-%d')
         ORDER BY date
         "#
     )
@@ -271,8 +271,8 @@ async fn get_quiz_session_analytics(
         r#"
         SELECT 
             COUNT(*) as total_sessions,
-            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE status = 'completed') as completed_sessions,
-            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE status = 'in_progress') as active_sessions,
+            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE is_completed = 1) as completed_sessions,
+            (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE is_completed = 0) as active_sessions,
             (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE DATE(created_at) = CURDATE()) as sessions_today,
             (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)) as sessions_this_week,
             (SELECT COUNT(*) FROM dbquizapp.quiz_sessions WHERE YEAR(created_at) = YEAR(NOW()) AND MONTH(created_at) = MONTH(NOW())) as sessions_this_month
@@ -334,8 +334,8 @@ async fn get_quiz_session_analytics(
         SELECT 
             qs.nama_paket_soal as package_name,
             COUNT(*) as total_sessions,
-            COUNT(CASE WHEN qs.status = 'completed' THEN 1 END) as completed_sessions,
-            (COUNT(CASE WHEN qs.status = 'completed' THEN 1 END) * 100.0 / COUNT(*)) as completion_rate
+            COUNT(CASE WHEN qs.is_completed = 1 THEN 1 END) as completed_sessions,
+            (COUNT(CASE WHEN qs.is_completed = 1 THEN 1 END) * 100.0 / COUNT(*)) as completion_rate
         FROM dbquizapp.quiz_sessions qs
         GROUP BY qs.nama_paket_soal
         HAVING COUNT(*) > 5
