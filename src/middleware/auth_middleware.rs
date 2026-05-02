@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 25] = [
+const PUBLIC_ROUTES: [&str; 26] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -121,6 +121,7 @@ const PUBLIC_ROUTES: [&str; 25] = [
     "/subscription/webhook", // Midtrans webhook — no JWT from payment gateway
     "/users/profile",         // Public profile — no auth required
     "/users/username/check",  // Username availability check — no auth required
+    "/static",               // Static file serving — publicly accessible without JWT
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware

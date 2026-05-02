@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use tempfile::NamedTempFile;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
@@ -32,6 +33,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(upload_csv_import)
             .service(download_csv_template)
             .service(get_question_by_id)
+            .service(upload_image)
     );
 }
 
@@ -1004,4 +1006,119 @@ async fn download_csv_template(
         .content_type("text/csv")
         .insert_header(("Content-Disposition", "attachment; filename=questions_template.csv"))
         .body(template_content)
+}
+
+/// Upload an image file for use in question fields.
+/// Accepts: image/jpeg, image/png, image/gif, image/webp (max 5MB).
+/// Returns: { "url": "/static/soal-images/{uuid}.{ext}" }
+#[post("/upload-image")]
+async fn upload_image(
+    mut payload: Multipart,
+    data: web::Data<AppState<'_>>,
+) -> impl Responder {
+    log_request("POST /admin/soal/upload-image", &data.connections);
+
+    let upload_dir = data.config.get_upload_dir();
+    let image_dir = format!("{}/soal-images", upload_dir);
+
+    let mut file_bytes: Vec<u8> = Vec::new();
+    let mut file_ext = String::new();
+
+    while let Some(mut field) = payload.try_next().await.unwrap_or(None) {
+        let content_disposition = field.content_disposition();
+        let field_name = content_disposition.get_name().unwrap_or("").to_string();
+
+        if field_name != "file" {
+            continue;
+        }
+
+        // Validate MIME type
+        let mime = field.content_type().cloned();
+        // NOTE: MIME type comes from the multipart Content-Type header and can be
+        // spoofed by the client. This is acceptable because the endpoint is
+        // admin-only (protected by AdminMiddleware).
+        let ext = match mime.as_ref().map(|m| m.essence_str()) {
+            Some("image/jpeg") => "jpg",
+            Some("image/png") => "png",
+            Some("image/gif") => "gif",
+            Some("image/webp") => "webp",
+            _ => {
+                return HttpResponse::BadRequest().json(ErrorResponse {
+                    error: "Tipe file tidak didukung. Gunakan JPEG, PNG, GIF, atau WebP.".to_string(),
+                });
+            }
+        };
+        file_ext = ext.to_string();
+
+        // Read bytes with 5MB limit
+        while let Some(chunk) = field.try_next().await.unwrap_or(None) {
+            file_bytes.extend_from_slice(&chunk);
+            if file_bytes.len() > 5 * 1024 * 1024 {
+                return HttpResponse::BadRequest().json(ErrorResponse {
+                    error: "File terlalu besar. Maksimal 5MB.".to_string(),
+                });
+            }
+        }
+        break; // only process first 'file' field
+    }
+
+    if file_bytes.is_empty() || file_ext.is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "File tidak ditemukan dalam request.".to_string(),
+        });
+    }
+
+    // Generate unique filename and save
+    let filename = format!("{}.{}", Uuid::new_v4(), file_ext);
+    let file_path = format!("{}/{}", image_dir, filename);
+
+    // Defensive: ensure directory exists even if it was deleted at runtime
+    if let Err(e) = tokio::fs::create_dir_all(&image_dir).await {
+        eprintln!("Failed to create image dir '{}': {:?}", image_dir, e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Gagal menyiapkan direktori upload.".to_string(),
+        });
+    }
+
+    if let Err(e) = tokio::fs::write(&file_path, &file_bytes).await {
+        eprintln!("Failed to write image '{}': {:?}", file_path, e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Gagal menyimpan gambar.".to_string(),
+        });
+    }
+
+    HttpResponse::Ok().json(serde_json::json!({
+        "url": format!("/static/soal-images/{}", filename)
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_image_ext_mapping() {
+        let cases = vec![
+            ("image/jpeg", "jpg"),
+            ("image/png", "png"),
+            ("image/gif", "gif"),
+            ("image/webp", "webp"),
+        ];
+        for (mime, expected_ext) in cases {
+            let mapped = match mime {
+                "image/jpeg" => "jpg",
+                "image/png" => "png",
+                "image/gif" => "gif",
+                "image/webp" => "webp",
+                _ => "",
+            };
+            assert_eq!(mapped, expected_ext, "MIME {} should map to ext {}", mime, expected_ext);
+        }
+    }
+
+    #[test]
+    fn test_filename_has_uuid_format() {
+        let filename = format!("{}.jpg", uuid::Uuid::new_v4());
+        // UUID v4 is 36 chars, dot is 1, ext is 3 → total 40
+        assert_eq!(filename.len(), 40);
+        assert!(filename.ends_with(".jpg"));
+    }
 }

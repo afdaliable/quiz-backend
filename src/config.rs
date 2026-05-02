@@ -76,6 +76,8 @@ pub struct Config {
     midtrans: MidtransConfig,
     #[serde(default)]
     ai: Option<AiConfig>,
+    #[serde(default)]
+    upload_dir: Option<String>,
 }
 
 impl Config {
@@ -177,5 +179,9 @@ impl Config {
 
     pub fn get_ai_config(&self) -> Option<&AiConfig> {
         self.ai.as_ref()
+    }
+
+    pub fn get_upload_dir(&self) -> String {
+        self.upload_dir.clone().unwrap_or_else(|| "./uploads".to_string())
     }
 }
