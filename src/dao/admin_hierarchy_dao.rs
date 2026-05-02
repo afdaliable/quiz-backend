@@ -752,6 +752,48 @@ impl AdminHierarchyDao {
         .fetch_one(&*self.pool)
         .await?;
 
+        let by_category: Vec<(Option<String>, i64)> = sqlx::query_as::<_, (Option<String>, i64)>(r#"
+            SELECT c.name, COUNT(s.id)
+            FROM soal s
+            LEFT JOIN exam_categories c ON c.id = s.category_id
+            GROUP BY c.name
+            ORDER BY COUNT(s.id) DESC
+        "#)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let recent: Vec<RecentQuestion> = sqlx::query_as::<_, RecentQuestion>(r#"
+            SELECT id, SUBSTRING(soal, 1, 80) as soal_snippet, status, COALESCE(track_id, '') as track_id, created_at
+            FROM soal
+            ORDER BY created_at DESC
+            LIMIT 10
+        "#)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let anomalies: Vec<AnomalyQuestion> = sqlx::query_as::<_, AnomalyQuestion>(r#"
+            SELECT id, SUBSTRING(soal, 1, 80) as soal_snippet, difficulty_est, COALESCE(difficulty_calc, '') as difficulty_calc
+            FROM soal
+            WHERE difficulty_calc IS NOT NULL AND difficulty_calc != difficulty_est
+            LIMIT 20
+        "#)
+        .fetch_all(&*self.pool)
+        .await?;
+
+        let coverage: Vec<CoverageEntry> = sqlx::query_as::<_, CoverageEntry>(r#"
+            SELECT t.id as topic_id, t.name as topic_name,
+                SUM(CASE WHEN s.difficulty_est = 'easy' THEN 1 ELSE 0 END) as easy,
+                SUM(CASE WHEN s.difficulty_est = 'medium' THEN 1 ELSE 0 END) as medium,
+                SUM(CASE WHEN s.difficulty_est = 'hard' THEN 1 ELSE 0 END) as hard
+            FROM exam_topics t
+            LEFT JOIN soal s ON s.topic_id = t.id
+            GROUP BY t.id, t.name
+            ORDER BY (easy + medium + hard) ASC
+            LIMIT 30
+        "#)
+        .fetch_all(&*self.pool)
+        .await?;
+
         Ok(QuestionStats {
             total,
             by_status: by_status.into_iter().map(|(k, v)| StatEntry { label: k, count: v }).collect(),
@@ -761,6 +803,13 @@ impl AdminHierarchyDao {
                 count: v,
             }).collect(),
             unclassified,
+            by_category: by_category.into_iter().map(|(k, v)| StatEntry {
+                label: k.unwrap_or_else(|| "Uncategorized".to_string()),
+                count: v,
+            }).collect(),
+            recent,
+            anomalies,
+            coverage,
         })
     }
 }
@@ -772,10 +821,78 @@ pub struct QuestionStats {
     pub by_difficulty: Vec<StatEntry>,
     pub by_track: Vec<StatEntry>,
     pub unclassified: i64,
+    pub by_category: Vec<StatEntry>,
+    pub recent: Vec<RecentQuestion>,
+    pub anomalies: Vec<AnomalyQuestion>,
+    pub coverage: Vec<CoverageEntry>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
 pub struct StatEntry {
     pub label: String,
     pub count: i64,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct RecentQuestion {
+    pub id: i64,
+    pub soal_snippet: String,
+    pub status: String,
+    pub track_id: String,
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for RecentQuestion {
+    fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(RecentQuestion {
+            id: row.get("id"),
+            soal_snippet: row.get("soal_snippet"),
+            status: row.get("status"),
+            track_id: row.get("track_id"),
+            created_at: row.try_get("created_at").ok(),
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct AnomalyQuestion {
+    pub id: i64,
+    pub soal_snippet: String,
+    pub difficulty_est: String,
+    pub difficulty_calc: String,
+}
+
+impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for AnomalyQuestion {
+    fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(AnomalyQuestion {
+            id: row.get("id"),
+            soal_snippet: row.get("soal_snippet"),
+            difficulty_est: row.get("difficulty_est"),
+            difficulty_calc: row.get("difficulty_calc"),
+        })
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct CoverageEntry {
+    pub topic_id: String,
+    pub topic_name: String,
+    pub easy: i64,
+    pub medium: i64,
+    pub hard: i64,
+}
+
+impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for CoverageEntry {
+    fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        Ok(CoverageEntry {
+            topic_id: row.get("topic_id"),
+            topic_name: row.get("topic_name"),
+            easy: row.get("easy"),
+            medium: row.get("medium"),
+            hard: row.get("hard"),
+        })
+    }
 }
