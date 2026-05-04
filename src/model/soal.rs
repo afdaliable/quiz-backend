@@ -277,6 +277,10 @@ pub struct QuestionSearchRequest {
     pub format: Option<String>,
     pub source: Option<String>,
     pub status: Option<String>,
+    /// true = only questions with a correct_answer set; false = only without
+    pub has_answer: Option<bool>,
+    /// true = only questions with a solution set; false = only without
+    pub has_solution: Option<bool>,
 }
 
 /// Paginated questions response
