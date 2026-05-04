@@ -138,6 +138,20 @@ async fn search_questions(
         where_conditions.push("s.status = ?");
         bind_values.push(status.clone());
     }
+    if let Some(has_answer) = query.has_answer {
+        if has_answer {
+            where_conditions.push("s.correct_answer IS NOT NULL AND s.correct_answer != ''");
+        } else {
+            where_conditions.push("(s.correct_answer IS NULL OR s.correct_answer = '')");
+        }
+    }
+    if let Some(has_solution) = query.has_solution {
+        if has_solution {
+            where_conditions.push("s.solution IS NOT NULL AND s.solution != ''");
+        } else {
+            where_conditions.push("(s.solution IS NULL OR s.solution = '')");
+        }
+    }
 
     let where_clause = where_conditions.join(" AND ");
 
