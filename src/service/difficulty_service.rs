@@ -79,6 +79,10 @@ pub async fn upsert_question_stats(
     let n_answered = user_answers.iter().filter(|a| a.is_some()).count().max(1) as i32;
     let time_per_q = time_spent_sec / n_answered; // distribute evenly
 
+    // Build single bulk INSERT instead of N separate queries
+    let mut placeholders: Vec<&str> = Vec::with_capacity(question_ids.len());
+    let mut params: Vec<(i32, i32, i64)> = Vec::with_capacity(question_ids.len());
+
     for (idx, &qid) in question_ids.iter().enumerate() {
         let user_answer = user_answers.get(idx).and_then(|a| *a);
         let is_correct: i32 = if let (Some(ua), Some(ca_str)) = (user_answer, correct_map.get(&qid)) {
@@ -86,27 +90,30 @@ pub async fn upsert_question_stats(
         } else {
             0
         };
-
         let time_contrib = if user_answer.is_some() { time_per_q } else { 0 };
+        placeholders.push("(?, 1, ?, ?)");
+        params.push((qid, is_correct, time_contrib as i64));
+    }
 
-        if let Err(e) = sqlx::query(
-            r#"
-            INSERT INTO question_attempt_stats (question_id, total_attempts, correct_count, total_time_sec)
-            VALUES (?, 1, ?, ?)
-            ON DUPLICATE KEY UPDATE
-                total_attempts = total_attempts + 1,
-                correct_count  = correct_count  + VALUES(correct_count),
-                total_time_sec = total_time_sec + VALUES(total_time_sec)
-            "#,
-        )
-        .bind(qid)
-        .bind(is_correct)
-        .bind(time_contrib as i64)
-        .execute(&*pool)
-        .await
-        {
-            eprintln!("[difficulty_service] UPSERT qas q={} err: {:?}", qid, e);
-        }
+    let query_str = format!(
+        r#"
+        INSERT INTO question_attempt_stats (question_id, total_attempts, correct_count, total_time_sec)
+        VALUES {}
+        ON DUPLICATE KEY UPDATE
+            total_attempts = total_attempts + 1,
+            correct_count  = correct_count  + VALUES(correct_count),
+            total_time_sec = total_time_sec + VALUES(total_time_sec)
+        "#,
+        placeholders.join(", ")
+    );
+
+    let mut q = sqlx::query(&query_str);
+    for (qid, is_correct, time_contrib) in params {
+        q = q.bind(qid).bind(is_correct).bind(time_contrib);
+    }
+
+    if let Err(e) = q.execute(&*pool).await {
+        eprintln!("[difficulty_service] bulk UPSERT qas err: {:?}", e);
     }
 }
 
