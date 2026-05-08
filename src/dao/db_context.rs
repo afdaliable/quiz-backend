@@ -18,6 +18,7 @@ use crate::model::users::RecommendedPackage;
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, MySqlPool};
+use sqlx::mysql::MySqlPoolOptions;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -274,7 +275,13 @@ pub struct Database<'c> {
 
 impl<'a> Database<'a> {
     pub async fn new(sql_url: &String) -> Database<'a> {
-        let pool = MySqlPool::connect(sql_url).await.unwrap();
+        let pool = MySqlPoolOptions::new()
+            .max_connections(50)
+            .min_connections(5)
+            .acquire_timeout(std::time::Duration::from_secs(10))
+            .connect(sql_url)
+            .await
+            .unwrap();
         let pool = Arc::new(pool);
 
         Database {
