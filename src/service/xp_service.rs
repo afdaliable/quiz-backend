@@ -21,7 +21,7 @@ pub struct XpAwardResult {
     pub new_level_icon: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct QuizXpBreakdown {
     pub quiz_complete: i32,
     pub correct_answers: i32,

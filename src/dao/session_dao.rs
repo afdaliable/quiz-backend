@@ -9,25 +9,20 @@ use redis::aio::ConnectionManager;
 
 impl<'c> Table<'c, Session> {
     pub async fn create_session_with_redis(
-        &self, 
-        user_id: &str, 
+        &self,
+        user_id: &str,
         username: &str,
-        ip_address: Option<&str>, 
+        ip_address: Option<&str>,
         user_agent: Option<&str>,
         redis_pool: Option<&crate::service::redis_service::RedisPool>
     ) -> Result<Session, Error> {
-        // Generate a random token
         let token = Uuid::new_v4().to_string();
-        
-        // Set expiration time (24 hours from now)
-        let expires_at = Utc::now() + Duration::hours(24);
-        
-        // Insert the session in MySQL
+        let now = Utc::now();
+        let expires_at = now + Duration::hours(24);
+
+        // INSERT — tidak perlu SELECT kembali setelah ini
         sqlx::query(
-            r#"
-            INSERT INTO sessions (user_id, token, expires_at, ip_address, user_agent)
-            VALUES (?, ?, ?, ?, ?)
-            "#,
+            "INSERT INTO sessions (user_id, token, expires_at, ip_address, user_agent) VALUES (?, ?, ?, ?, ?)"
         )
         .bind(user_id)
         .bind(&token)
@@ -36,8 +31,8 @@ impl<'c> Table<'c, Session> {
         .bind(user_agent)
         .execute(&*self.pool)
         .await?;
-        
-        // Cache session in Redis if available
+
+        // Store in Redis (fire-and-forget style — tidak blok response)
         if let Some(pool) = redis_pool {
             let redis_session = UserSession {
                 user_id: user_id.to_string(),
@@ -47,15 +42,23 @@ impl<'c> Table<'c, Session> {
                 ip_address: ip_address.map(|s| s.to_string()),
                 user_agent: user_agent.map(|s| s.to_string()),
             };
-            
             let mut con = pool.sessions().as_ref().clone();
             if let Err(e) = RedisService::store_session(&mut con, &token, &redis_session).await {
                 eprintln!("Failed to cache session in Redis: {:?}", e);
             }
         }
-        
-        // Fetch the newly created session
-        self.get_session_by_token(&token).await
+
+        // Return session langsung dari data yang sudah kita punya — tanpa extra SELECT
+        Ok(Session {
+            id: 0, // auto-increment, tidak dipakai di response
+            user_id: user_id.to_string(),
+            token,
+            expires_at,
+            ip_address: ip_address.map(|s| s.to_string()),
+            user_agent: user_agent.map(|s| s.to_string()),
+            created_at: now,
+            updated_at: now,
+        })
     }
 
     pub async fn create_session(

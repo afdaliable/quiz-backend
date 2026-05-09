@@ -174,11 +174,9 @@ pub async fn complete_quiz_session(
                 });
             }
 
-            // Award XP — never fail the quiz request if XP fails
+            // Award XP — fire-and-forget, tidak blok response
             let is_study_mode = session.session_type == "study";
             let breakdown = compute_quiz_xp(session.score, session.correct_answers, is_study_mode);
-            let pool = &*state.context.users.pool;
-            let xp_result = award_quiz_xp(pool, user_id, &session.id, &breakdown).await.ok();
 
             let xp_breakdown_resp = XpBreakdownResponse {
                 quiz_complete: breakdown.quiz_complete,
@@ -186,14 +184,19 @@ pub async fn complete_quiz_session(
                 score_bonus: breakdown.score_bonus,
                 total: breakdown.total,
             };
-            let xp_result_resp = xp_result.map(|r| XpAwardResultResponse {
-                xp_awarded: r.xp_awarded,
-                total_xp: r.total_xp,
-                leveled_up: r.leveled_up,
-                new_level: r.new_level,
-                new_level_name: r.new_level_name,
-                new_level_icon: r.new_level_icon,
-            });
+
+            {
+                let pool_xp = state.context.users.pool.clone();
+                let uid_xp = user_id.to_string();
+                let sid_xp = session.id.clone();
+                let bd = breakdown.clone();
+                tokio::spawn(async move {
+                    let _ = award_quiz_xp(&pool_xp, &uid_xp, &sid_xp, &bd).await;
+                });
+            }
+
+            // xp_result tidak tersedia synchronous — XP tetap dihitung di background
+            let xp_result_resp: Option<XpAwardResultResponse> = None;
 
             let resp: QuizSessionResponse = session.into();
             let with_xp = CompleteSessionWithXpResponse {

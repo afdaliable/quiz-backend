@@ -156,27 +156,41 @@ async fn admin_login(
             
             match token {
                 Ok(jwt) => {
-                    // Update last login time
-                    let _ = sqlx::query(
-                        "UPDATE dbquizapp.users SET last_login = NOW() WHERE id = ?"
-                    )
-                    .bind(&user.id)
-                    .execute(&*app_state.context.users.pool)
-                    .await;
-
-                    // Delete any existing sessions for this user
-                    if let Err(e) = app_state.context.sessions.delete_all_user_sessions(&user.id).await {
-                        eprintln!("Failed to delete existing sessions: {:?}", e);
+                    // Fire-and-forget: update last_login — tidak perlu tunggu
+                    {
+                        let pool = app_state.context.users.pool.clone();
+                        let uid = user.id.clone();
+                        tokio::spawn(async move {
+                            let _ = sqlx::query("UPDATE dbquizapp.users SET last_login = NOW() WHERE id = ?")
+                                .bind(&uid)
+                                .execute(&*pool)
+                                .await;
+                        });
                     }
-                    
-                    // Create a new session
+
+                    // Fire-and-forget: hapus sesi lama — tidak blok login
+                    {
+                        let pool = app_state.context.sessions.pool.clone();
+                        let uid = user.id.clone();
+                        tokio::spawn(async move {
+                            let _ = sqlx::query("DELETE FROM sessions WHERE user_id = ?")
+                                .bind(&uid)
+                                .execute(&*pool)
+                                .await;
+                        });
+                    }
+
+                    // Create session — langsung tanpa tunggu DELETE selesai
                     let ip_address = http_request.connection_info().realip_remote_addr().map(|s| s.to_string());
                     let user_agent = http_request.headers().get("User-Agent").and_then(|h| h.to_str().ok()).map(|s| s.to_string());
-                    
-                    match app_state.context.sessions.create_session(
+                    let redis_pool_ref = app_state.redis_pool.as_deref();
+
+                    match app_state.context.sessions.create_session_with_redis(
                         &user.id,
+                        &user.email,
                         ip_address.as_deref(),
-                        user_agent.as_deref()
+                        user_agent.as_deref(),
+                        redis_pool_ref,
                     ).await {
                         Ok(session) => {
                             let response = json!({
