@@ -185,8 +185,10 @@ async fn get_list_paket_soal(
     if let Some(redis_pool) = &app_state.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ListPaketSoal>>(&mut con, CKEY_LIST_PAKET_SOAL).await {
+            println!("[CACHE HIT] /listpaketsoal");
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /listpaketsoal — fetch from DB");
         match app_state.context.paket_soal_response.get_list_paket_soal().await {
             Ok(list) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL, &list, CACHE_TTL_STATIC).await;
@@ -345,8 +347,10 @@ async fn get_list_paket_soal_lengkap(
     if let Some(redis_pool) = &app_state.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ListPaketSoalLengkap>>(&mut con, CKEY_LIST_PAKET_SOAL_LENGKAP).await {
+            println!("[CACHE HIT] /listpaketsoallengkap");
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /listpaketsoallengkap — fetch from DB");
         match app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await {
             Ok(list) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL_LENGKAP, &list, CACHE_TTL_STATIC).await;

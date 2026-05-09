@@ -39,7 +39,31 @@ impl<'c> Table<'c, QuizSession> {
         .execute(&*self.pool)
         .await?;
 
-        self.get_quiz_session_by_id(&session_id, user_id).await
+        // Return langsung tanpa extra SELECT
+        Ok(QuizSession {
+            id: session_id,
+            user_id: user_id.to_string(),
+            paket_soal_id: Some(request.paket_soal_id),
+            kategori_soal: request.kategori_soal.clone(),
+            nama_paket_soal: request.nama_paket_soal.clone(),
+            session_type: "standard".to_string(),
+            question_ids: None,
+            current_question: 0,
+            answers: None,
+            marked_questions: None,
+            time_remaining: Some(request.total_time),
+            total_time: Some(request.total_time),
+            is_completed: false,
+            score: 0,
+            correct_answers: 0,
+            incorrect_answers: 0,
+            pomodoro_enabled: false,
+            pomodoro_sessions: 0,
+            pomodoro_focus_minutes: 0,
+            pomodoro_questions_answered: 0,
+            created_at: now,
+            updated_at: now,
+        })
     }
 
     /// Buat sesi random: ambil soal acak yang bisa diakses user, simpan question_ids di session.
