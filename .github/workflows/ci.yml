@@ -71,7 +71,7 @@ jobs:
         run: |
           docker run -d --name quiz-backend \
             -p 8787:8787 \
-            --network redis_quiz_network \
+            --network redis_quiz-network \
             -v /volume1/docker/quiz/backend/app/config.json:/app/config.json \
             -v /volume1/docker/quiz/backend/uploads:/data/uploads \
             --workdir /app \
