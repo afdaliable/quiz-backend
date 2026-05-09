@@ -4,7 +4,8 @@ use super::AppState;
 // use crate::model::Soal;
 use actix_web::{get, web, HttpResponse, Responder, HttpRequest};
 use crate::utils::auth::extract_user_id;
-use crate::service::redis_service::RedisService;
+use crate::service::redis_service::{RedisService, CKEY_LIST_PAKET_SOAL, CKEY_LIST_PAKET_SOAL_LENGKAP, CACHE_TTL_STATIC};
+use crate::model::{ListPaketSoal, ListPaketSoalLengkap};
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(list_soal)
        .service(get_soal)
@@ -180,15 +181,30 @@ async fn get_list_paket_soal(
     app_state: web::Data<AppState<'_>>,
 ) -> impl Responder {
     log_request("GET: /listpaketsoal", &app_state.connections);
-    
-    let list_paket_soal = app_state.context.paket_soal_response.get_list_paket_soal().await;
 
-    match list_paket_soal {
-        Err(e) => {
-            println!("Error: {:?}", e);
-            HttpResponse::InternalServerError().finish()
-        },
-        Ok(list_paket_soal) => HttpResponse::Ok().json(list_paket_soal),
+    if let Some(redis_pool) = &app_state.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ListPaketSoal>>(&mut con, CKEY_LIST_PAKET_SOAL).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match app_state.context.paket_soal_response.get_list_paket_soal().await {
+            Ok(list) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL, &list, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(list)
+            }
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                HttpResponse::InternalServerError().finish()
+            }
+        }
+    } else {
+        match app_state.context.paket_soal_response.get_list_paket_soal().await {
+            Ok(list) => HttpResponse::Ok().json(list),
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                HttpResponse::InternalServerError().finish()
+            }
+        }
     }
 }
 
@@ -325,15 +341,30 @@ async fn get_list_paket_soal_lengkap(
     app_state: web::Data<AppState<'_>>,
 ) -> impl Responder {
     log_request("GET: /listpaketsoallengkap", &app_state.connections);
-    
-    let list_paket_soal = app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await;
 
-    match list_paket_soal {
-        Err(e) => {
-            println!("Error: {:?}", e);
-            HttpResponse::InternalServerError().finish()
-        },
-        Ok(list_paket_soal) => HttpResponse::Ok().json(list_paket_soal),
+    if let Some(redis_pool) = &app_state.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ListPaketSoalLengkap>>(&mut con, CKEY_LIST_PAKET_SOAL_LENGKAP).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await {
+            Ok(list) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL_LENGKAP, &list, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(list)
+            }
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                HttpResponse::InternalServerError().finish()
+            }
+        }
+    } else {
+        match app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await {
+            Ok(list) => HttpResponse::Ok().json(list),
+            Err(e) => {
+                eprintln!("Error: {:?}", e);
+                HttpResponse::InternalServerError().finish()
+            }
+        }
     }
 }
 

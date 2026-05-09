@@ -3,6 +3,7 @@ use crate::middleware::admin_middleware::AdminMiddleware;
 use crate::model::paket_soal::{PaketSoal, AdminPaketSoal, AdminPaketSoalRequest, CreatePaketSoalRequest, UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest, PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix};
 use rand::seq::SliceRandom;
 use crate::model::soal::AdminSoal;
+use crate::service::redis_service::RedisService;
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
 use serde::{Deserialize, Serialize};
@@ -239,7 +240,13 @@ async fn create_package(
     match result {
         Ok(result) => {
             let package_id = result.last_insert_id() as i32;
-            
+
+            // Invalidate list caches karena paket soal baru ditambahkan
+            if let Some(redis_pool) = &data.redis_pool {
+                let mut con = redis_pool.quiz_cache().as_ref().clone();
+                let _ = RedisService::invalidate_package_caches(&mut con).await;
+            }
+
             // Fetch the created package
             match get_package_by_id_internal(&data, package_id).await {
                 Ok(package) => HttpResponse::Created().json(package),
@@ -352,6 +359,11 @@ async fn update_package(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                // Invalidate list caches karena data paket soal berubah
+                if let Some(redis_pool) = &data.redis_pool {
+                    let mut con = redis_pool.quiz_cache().as_ref().clone();
+                    let _ = RedisService::invalidate_package_caches(&mut con).await;
+                }
                 match get_package_by_id_internal(&data, package_id).await {
                     Ok(package) => HttpResponse::Ok().json(package),
                     Err(e) => {
@@ -441,6 +453,11 @@ async fn delete_package(
                     return HttpResponse::InternalServerError().json(ErrorResponse {
                         error: "Failed to commit transaction".to_string(),
                     });
+                }
+                // Invalidate list caches karena paket soal dihapus
+                if let Some(redis_pool) = &data.redis_pool {
+                    let mut con = redis_pool.quiz_cache().as_ref().clone();
+                    let _ = RedisService::invalidate_package_caches(&mut con).await;
                 }
                 HttpResponse::NoContent().finish()
             } else {
