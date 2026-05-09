@@ -2,7 +2,8 @@ use actix_web::{get, web, HttpResponse, Responder};
 use serde::Deserialize;
 use crate::AppState;
 use crate::dao::taxonomy_dao::TaxonomyDao;
-use crate::service::redis_service::RedisService;
+use crate::service::redis_service::{RedisService, CKEY_TRACKS, CACHE_TTL_STATIC};
+use crate::model::taxonomy::{ExamTrack, Category, Subcategory, Topic, Tag};
 
 #[derive(Deserialize)]
 pub struct TagSearchQuery {
@@ -23,11 +24,28 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 #[get("/tracks")]
 async fn get_all_tracks(data: web::Data<AppState<'_>>) -> impl Responder {
     let dao = TaxonomyDao::new(data.context.soal.pool.clone());
-    match dao.get_all_tracks().await {
-        Ok(tracks) => HttpResponse::Ok().json(tracks),
-        Err(e) => {
-            eprintln!("Error fetching tracks: {:?}", e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tracks"}))
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ExamTrack>>(&mut con, CKEY_TRACKS).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match dao.get_all_tracks().await {
+            Ok(tracks) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_TRACKS, &tracks, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(tracks)
+            }
+            Err(e) => {
+                eprintln!("Error fetching tracks: {:?}", e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tracks"}))
+            }
+        }
+    } else {
+        match dao.get_all_tracks().await {
+            Ok(tracks) => HttpResponse::Ok().json(tracks),
+            Err(e) => {
+                eprintln!("Error fetching tracks: {:?}", e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tracks"}))
+            }
         }
     }
 }
@@ -40,11 +58,29 @@ async fn get_categories_by_track(
 ) -> impl Responder {
     let slug = path.into_inner();
     let dao = TaxonomyDao::new(data.context.soal.pool.clone());
-    match dao.get_categories_by_track_slug(&slug).await {
-        Ok(cats) => HttpResponse::Ok().json(cats),
-        Err(e) => {
-            eprintln!("Error fetching categories for track {}: {:?}", slug, e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch categories"}))
+    let cache_key = format!("static:track:{}:categories", slug);
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Category>>(&mut con, &cache_key).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match dao.get_categories_by_track_slug(&slug).await {
+            Ok(cats) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &cats, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(cats)
+            }
+            Err(e) => {
+                eprintln!("Error fetching categories for track {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch categories"}))
+            }
+        }
+    } else {
+        match dao.get_categories_by_track_slug(&slug).await {
+            Ok(cats) => HttpResponse::Ok().json(cats),
+            Err(e) => {
+                eprintln!("Error fetching categories for track {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch categories"}))
+            }
         }
     }
 }
@@ -57,11 +93,29 @@ async fn get_subcategories_by_category(
 ) -> impl Responder {
     let slug = path.into_inner();
     let dao = TaxonomyDao::new(data.context.soal.pool.clone());
-    match dao.get_subcategories_by_category_slug(&slug).await {
-        Ok(subs) => HttpResponse::Ok().json(subs),
-        Err(e) => {
-            eprintln!("Error fetching subcategories for category {}: {:?}", slug, e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch subcategories"}))
+    let cache_key = format!("static:category:{}:subcategories", slug);
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Subcategory>>(&mut con, &cache_key).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match dao.get_subcategories_by_category_slug(&slug).await {
+            Ok(subs) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &subs, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(subs)
+            }
+            Err(e) => {
+                eprintln!("Error fetching subcategories for category {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch subcategories"}))
+            }
+        }
+    } else {
+        match dao.get_subcategories_by_category_slug(&slug).await {
+            Ok(subs) => HttpResponse::Ok().json(subs),
+            Err(e) => {
+                eprintln!("Error fetching subcategories for category {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch subcategories"}))
+            }
         }
     }
 }
@@ -74,11 +128,29 @@ async fn get_topics_by_subcategory(
 ) -> impl Responder {
     let slug = path.into_inner();
     let dao = TaxonomyDao::new(data.context.soal.pool.clone());
-    match dao.get_topics_by_subcategory_slug(&slug).await {
-        Ok(topics) => HttpResponse::Ok().json(topics),
-        Err(e) => {
-            eprintln!("Error fetching topics for subcategory {}: {:?}", slug, e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch topics"}))
+    let cache_key = format!("static:subcategory:{}:topics", slug);
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Topic>>(&mut con, &cache_key).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match dao.get_topics_by_subcategory_slug(&slug).await {
+            Ok(topics) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &topics, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(topics)
+            }
+            Err(e) => {
+                eprintln!("Error fetching topics for subcategory {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch topics"}))
+            }
+        }
+    } else {
+        match dao.get_topics_by_subcategory_slug(&slug).await {
+            Ok(topics) => HttpResponse::Ok().json(topics),
+            Err(e) => {
+                eprintln!("Error fetching topics for subcategory {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch topics"}))
+            }
         }
     }
 }
@@ -91,11 +163,29 @@ async fn get_tags_by_topic(
 ) -> impl Responder {
     let slug = path.into_inner();
     let dao = TaxonomyDao::new(data.context.soal.pool.clone());
-    match dao.get_tags_by_topic_slug(&slug).await {
-        Ok(tags) => HttpResponse::Ok().json(tags),
-        Err(e) => {
-            eprintln!("Error fetching tags for topic {}: {:?}", slug, e);
-            HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tags"}))
+    let cache_key = format!("static:topic:{}:tags", slug);
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Tag>>(&mut con, &cache_key).await {
+            return HttpResponse::Ok().json(cached);
+        }
+        match dao.get_tags_by_topic_slug(&slug).await {
+            Ok(tags) => {
+                let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &tags, CACHE_TTL_STATIC).await;
+                HttpResponse::Ok().json(tags)
+            }
+            Err(e) => {
+                eprintln!("Error fetching tags for topic {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tags"}))
+            }
+        }
+    } else {
+        match dao.get_tags_by_topic_slug(&slug).await {
+            Ok(tags) => HttpResponse::Ok().json(tags),
+            Err(e) => {
+                eprintln!("Error fetching tags for topic {}: {:?}", slug, e);
+                HttpResponse::InternalServerError().json(serde_json::json!({"error": "Failed to fetch tags"}))
+            }
         }
     }
 }

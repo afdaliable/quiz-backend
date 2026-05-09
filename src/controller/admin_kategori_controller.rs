@@ -1,6 +1,7 @@
 use crate::controller::log_request;
 use crate::model::kategori_soal::{KategoriSoal, AdminKategoriSoal, AdminKategoriRequest};
 use crate::middleware::admin_middleware::AdminMiddleware;
+use crate::service::redis_service::RedisService;
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
 use serde::{Deserialize, Serialize};
@@ -143,7 +144,13 @@ async fn create_category(
     match result {
         Ok(result) => {
             let category_id = result.last_insert_id() as i32;
-            
+
+            // Invalidate static caches karena data kategori berubah
+            if let Some(redis_pool) = &data.redis_pool {
+                let mut con = redis_pool.quiz_cache().as_ref().clone();
+                let _ = RedisService::invalidate_category_caches(&mut con).await;
+            }
+
             // Fetch the created category
             match get_category_by_id_internal(&data, category_id).await {
                 Ok(category) => HttpResponse::Created().json(category),
@@ -274,6 +281,11 @@ async fn update_category(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                // Invalidate static caches karena data kategori berubah
+                if let Some(redis_pool) = &data.redis_pool {
+                    let mut con = redis_pool.quiz_cache().as_ref().clone();
+                    let _ = RedisService::invalidate_category_caches(&mut con).await;
+                }
                 match get_category_by_id_internal(&data, category_id).await {
                     Ok(category) => HttpResponse::Ok().json(category),
                     Err(e) => {
@@ -359,6 +371,11 @@ async fn delete_category(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                // Invalidate static caches karena data kategori berubah
+                if let Some(redis_pool) = &data.redis_pool {
+                    let mut con = redis_pool.quiz_cache().as_ref().clone();
+                    let _ = RedisService::invalidate_category_caches(&mut con).await;
+                }
                 HttpResponse::NoContent().finish()
             } else {
                 HttpResponse::NotFound().json(ErrorResponse {

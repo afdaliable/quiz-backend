@@ -3,6 +3,15 @@ use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use chrono::{DateTime, Utc, Duration};
 
+// ── Cache key constants (parameter to get_cached_quiz_by_key / cache_quiz_by_key)
+// Redis akan menyimpannya sebagai "quiz:{KEY}"
+pub const CKEY_SEMUA_KATEGORI: &str = "static:semua_kategori";
+pub const CKEY_LIST_PAKET_SOAL: &str = "static:list_paket_soal";
+pub const CKEY_LIST_PAKET_SOAL_LENGKAP: &str = "static:list_paket_soal_lengkap";
+pub const CKEY_TRACKS: &str = "static:tracks";
+pub const CKEY_TAXONOMY_TREE: &str = "taxonomy:tree:v1";
+pub const CACHE_TTL_STATIC: usize = 3600; // 1 jam untuk data statis
+
 #[derive(Clone)]
 pub struct RedisPool {
     session_manager: Arc<ConnectionManager>,
@@ -309,5 +318,35 @@ impl RedisService {
                 redis::cmd("PING").query_async(con).await
             }
         }
+    }
+
+    // ── Cache invalidation helpers ───────────────────────────────────────────
+
+    /// Hapus semua cache statis yang terkait dengan perubahan kategori.
+    /// Dipanggil saat admin membuat / mengubah / menghapus kategori.
+    pub async fn invalidate_category_caches(con: &mut ConnectionManager) -> RedisResult<()> {
+        let keys: Vec<String> = vec![
+            format!("quiz:{}", CKEY_SEMUA_KATEGORI),
+            format!("quiz:{}", CKEY_LIST_PAKET_SOAL),
+            format!("quiz:{}", CKEY_LIST_PAKET_SOAL_LENGKAP),
+            format!("quiz:{}", CKEY_TAXONOMY_TREE),
+        ];
+        con.del(keys).await
+    }
+
+    /// Hapus semua cache statis yang terkait dengan perubahan paket soal.
+    /// Dipanggil saat admin membuat / mengubah / menghapus paket soal.
+    pub async fn invalidate_package_caches(con: &mut ConnectionManager) -> RedisResult<()> {
+        let keys: Vec<String> = vec![
+            format!("quiz:{}", CKEY_LIST_PAKET_SOAL),
+            format!("quiz:{}", CKEY_LIST_PAKET_SOAL_LENGKAP),
+        ];
+        con.del(keys).await
+    }
+
+    /// Hapus cache paket soal response spesifik (konten soal dalam paket).
+    /// `cache_key_hash` adalah hash md5 dari "{kategori}:{nama_paket}".
+    pub async fn invalidate_paket_soal_response(con: &mut ConnectionManager, cache_key_hash: &str) -> RedisResult<()> {
+        con.del(format!("quiz:{}", cache_key_hash)).await
     }
 }
