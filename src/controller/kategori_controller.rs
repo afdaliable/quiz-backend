@@ -30,8 +30,10 @@ async fn get_semua_kategori(
     if let Some(redis_pool) = &app_state.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<KategoriSoal>>(&mut con, CKEY_SEMUA_KATEGORI).await {
+            println!("[CACHE HIT] /semuaKategori");
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /semuaKategori — fetch from DB");
         match app_state.context.kategori.get_all_category().await {
             Ok(categories) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_SEMUA_KATEGORI, &categories, CACHE_TTL_STATIC).await;

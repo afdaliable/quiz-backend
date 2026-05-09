@@ -27,8 +27,10 @@ async fn get_all_tracks(data: web::Data<AppState<'_>>) -> impl Responder {
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ExamTrack>>(&mut con, CKEY_TRACKS).await {
+            println!("[CACHE HIT] /tracks");
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /tracks — fetch from DB");
         match dao.get_all_tracks().await {
             Ok(tracks) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_TRACKS, &tracks, CACHE_TTL_STATIC).await;
@@ -62,8 +64,10 @@ async fn get_categories_by_track(
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Category>>(&mut con, &cache_key).await {
+            println!("[CACHE HIT] /tracks/{}/categories", slug);
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /tracks/{}/categories — fetch from DB", slug);
         match dao.get_categories_by_track_slug(&slug).await {
             Ok(cats) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &cats, CACHE_TTL_STATIC).await;
@@ -97,8 +101,10 @@ async fn get_subcategories_by_category(
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Subcategory>>(&mut con, &cache_key).await {
+            println!("[CACHE HIT] /categories/{}/subcategories", slug);
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /categories/{}/subcategories — fetch from DB", slug);
         match dao.get_subcategories_by_category_slug(&slug).await {
             Ok(subs) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &subs, CACHE_TTL_STATIC).await;
@@ -132,8 +138,10 @@ async fn get_topics_by_subcategory(
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Topic>>(&mut con, &cache_key).await {
+            println!("[CACHE HIT] /subcategories/{}/topics", slug);
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /subcategories/{}/topics — fetch from DB", slug);
         match dao.get_topics_by_subcategory_slug(&slug).await {
             Ok(topics) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &topics, CACHE_TTL_STATIC).await;
@@ -167,8 +175,10 @@ async fn get_tags_by_topic(
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<Tag>>(&mut con, &cache_key).await {
+            println!("[CACHE HIT] /topics/{}/tags", slug);
             return HttpResponse::Ok().json(cached);
         }
+        println!("[CACHE MISS] /topics/{}/tags — fetch from DB", slug);
         match dao.get_tags_by_topic_slug(&slug).await {
             Ok(tags) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, &cache_key, &tags, CACHE_TTL_STATIC).await;
