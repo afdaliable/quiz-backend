@@ -72,7 +72,7 @@ pub struct StartRandomSessionRequest {
     pub category: Option<String>, // filter by kategori_soal, None = semua
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateQuizSessionRequest {
     pub current_question: Option<i32>,
     pub answers: Option<Vec<Option<i32>>>,
