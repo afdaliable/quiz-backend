@@ -1,4 +1,5 @@
 use actix_web::{web, HttpResponse, HttpRequest};
+use chrono::Utc;
 use crate::model::{
     QuizSession, QuizSessionResponse, CreateQuizSessionRequest,
     UpdateQuizSessionRequest, CompleteQuizSessionRequest, StartRandomSessionRequest,
@@ -6,6 +7,7 @@ use crate::model::{
 use crate::model::xp::{XpBreakdownResponse, XpAwardResultResponse, CompleteSessionWithXpResponse};
 use crate::service::xp_service::{compute_quiz_xp, award_quiz_xp};
 use crate::service::difficulty_service::upsert_question_stats;
+use crate::service::redis_service::RedisService;
 use crate::AppState;
 use crate::middleware::auth_middleware::AuthenticatedUser;
 
@@ -18,6 +20,11 @@ pub async fn create_quiz_session(
 
     match state.context.quiz_sessions.create_quiz_session(user_id, &req).await {
         Ok(session) => {
+            // Cache in Redis for cross-node consistency
+            if let Some(redis_pool) = &state.redis_pool {
+                let mut con = redis_pool.progress().as_ref().clone();
+                let _ = RedisService::cache_active_session(&mut con, &session.id, &session).await;
+            }
             let response: QuizSessionResponse = session.into();
             HttpResponse::Ok().json(response)
         }
@@ -49,7 +56,42 @@ pub async fn start_random_session(
     }
 
     match state.context.quiz_sessions.create_random_session(user_id, &req).await {
-        Ok(response) => HttpResponse::Ok().json(response),
+        Ok(response) => {
+            // Cache session in Redis — reconstruct QuizSession from response fields
+            if let Some(redis_pool) = &state.redis_pool {
+                let question_ids_json = serde_json::to_string(
+                    &response.questions.iter().map(|q| q.id).collect::<Vec<i32>>()
+                ).unwrap_or_else(|_| "[]".to_string());
+                let now = Utc::now();
+                let session_to_cache = QuizSession {
+                    id: response.session_id.clone(),
+                    user_id: user_id.to_string(),
+                    paket_soal_id: None,
+                    kategori_soal: response.kategori_soal.clone(),
+                    nama_paket_soal: response.nama_paket_soal.clone(),
+                    session_type: response.session_type.clone(),
+                    question_ids: Some(question_ids_json),
+                    current_question: 0,
+                    answers: None,
+                    marked_questions: None,
+                    time_remaining: Some(response.total_time),
+                    total_time: Some(response.total_time),
+                    is_completed: false,
+                    score: 0,
+                    correct_answers: 0,
+                    incorrect_answers: 0,
+                    pomodoro_enabled: false,
+                    pomodoro_sessions: 0,
+                    pomodoro_focus_minutes: 0,
+                    pomodoro_questions_answered: 0,
+                    created_at: now,
+                    updated_at: now,
+                };
+                let mut con = redis_pool.progress().as_ref().clone();
+                let _ = RedisService::cache_active_session(&mut con, &session_to_cache.id, &session_to_cache).await;
+            }
+            HttpResponse::Ok().json(response)
+        }
         Err(sqlx::Error::RowNotFound) => {
             HttpResponse::NotFound().json(serde_json::json!({
                 "success": false,
@@ -74,6 +116,18 @@ pub async fn get_quiz_session(
     let session_id = path.into_inner();
     let user_id = &user.user_id;
 
+    // Check Redis first (cross-node session consistency)
+    if let Some(redis_pool) = &state.redis_pool {
+        let mut con = redis_pool.progress().as_ref().clone();
+        if let Ok(Some(session)) = RedisService::get_active_session(&mut con, &session_id).await {
+            if session.user_id == *user_id {
+                let response: QuizSessionResponse = session.into();
+                return HttpResponse::Ok().json(response);
+            }
+        }
+    }
+
+    // Fallback to MySQL
     match state.context.quiz_sessions.get_quiz_session_by_id(&session_id, user_id).await {
         Ok(session) => {
             let response: QuizSessionResponse = session.into();
@@ -108,8 +162,72 @@ pub async fn save_quiz_progress(
     let session_id = path.into_inner();
     let user_id = &user.user_id;
 
+    // Redis-primary path: update Redis immediately, fire-and-forget MySQL
+    if let Some(redis_pool) = &state.redis_pool {
+        let mut con = redis_pool.progress().as_ref().clone();
+        if let Ok(Some(mut session)) = RedisService::get_active_session(&mut con, &session_id).await {
+            if session.user_id == *user_id && !session.is_completed {
+                // Apply request fields to cached session
+                let now = Utc::now();
+                if let Some(cq) = req.current_question {
+                    session.current_question = cq;
+                }
+                if let Some(ref answers) = req.answers {
+                    session.answers = serde_json::to_string(answers).ok();
+                }
+                if let Some(ref marked) = req.marked_questions {
+                    session.marked_questions = serde_json::to_string(marked).ok();
+                }
+                if let Some(tr) = req.time_remaining {
+                    session.time_remaining = Some(tr);
+                }
+                session.updated_at = now;
+
+                // Save updated session back to Redis
+                let _ = RedisService::cache_active_session(&mut con, &session_id, &session).await;
+
+                // Fire-and-forget: persist to MySQL in background
+                {
+                    let pool = state.context.quiz_sessions.pool.clone();
+                    let sid = session_id.clone();
+                    let uid = user_id.to_string();
+                    let req_inner = req.into_inner();
+                    tokio::spawn(async move {
+                        let now_db = Utc::now();
+                        let mut q = "UPDATE quiz_sessions SET updated_at = ?".to_string();
+                        if req_inner.current_question.is_some() { q.push_str(", current_question = ?"); }
+                        if req_inner.answers.is_some() { q.push_str(", answers = ?"); }
+                        if req_inner.marked_questions.is_some() { q.push_str(", marked_questions = ?"); }
+                        if req_inner.time_remaining.is_some() { q.push_str(", time_remaining = ?"); }
+                        q.push_str(" WHERE id = ? AND user_id = ? AND is_completed = FALSE");
+
+                        let mut sql = sqlx::query(&q).bind(now_db);
+                        if let Some(cq) = req_inner.current_question { sql = sql.bind(cq); }
+                        if let Some(ref a) = req_inner.answers {
+                            sql = sql.bind(serde_json::to_string(a).unwrap_or_default());
+                        }
+                        if let Some(ref m) = req_inner.marked_questions {
+                            sql = sql.bind(serde_json::to_string(m).unwrap_or_default());
+                        }
+                        if let Some(tr) = req_inner.time_remaining { sql = sql.bind(tr); }
+                        let _ = sql.bind(sid).bind(uid).execute(&*pool).await;
+                    });
+                }
+
+                let response: QuizSessionResponse = session.into();
+                return HttpResponse::Ok().json(response);
+            }
+        }
+    }
+
+    // Fallback: synchronous MySQL update (Redis miss or unavailable)
     match state.context.quiz_sessions.update_quiz_session(&session_id, user_id, &req).await {
         Ok(session) => {
+            // Cache result in Redis for future requests
+            if let Some(redis_pool) = &state.redis_pool {
+                let mut con = redis_pool.progress().as_ref().clone();
+                let _ = RedisService::cache_active_session(&mut con, &session_id, &session).await;
+            }
             let response: QuizSessionResponse = session.into();
             HttpResponse::Ok().json(response)
         }
@@ -144,6 +262,16 @@ pub async fn complete_quiz_session(
 
     match state.context.quiz_sessions.complete_quiz_session(&session_id, user_id, &req).await {
         Ok(session) => {
+            // Delete from Redis (fire-and-forget — stale TTL is 4h but delete proactively)
+            if let Some(redis_pool) = &state.redis_pool {
+                let redis_con = redis_pool.progress();
+                let sid_redis = session.id.clone();
+                tokio::spawn(async move {
+                    let mut con = redis_con.as_ref().clone();
+                    let _ = RedisService::delete_active_session(&mut con, &sid_redis).await;
+                });
+            }
+
             // Fire-and-forget: update question_attempt_stats (AFD-206)
             {
                 let pool = state.context.soal.pool.clone();

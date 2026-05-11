@@ -2,6 +2,7 @@ use redis::{Client, aio::ConnectionManager, AsyncCommands, RedisResult, RedisErr
 use serde::{Serialize, Deserialize};
 use std::sync::Arc;
 use chrono::{DateTime, Utc, Duration};
+use crate::model::QuizSession;
 
 // ── Cache key constants (parameter to get_cached_quiz_by_key / cache_quiz_by_key)
 // Redis akan menyimpannya sebagai "quiz:{KEY}"
@@ -348,5 +349,36 @@ impl RedisService {
     /// `cache_key_hash` adalah hash md5 dari "{kategori}:{nama_paket}".
     pub async fn invalidate_paket_soal_response(con: &mut ConnectionManager, cache_key_hash: &str) -> RedisResult<()> {
         con.del(format!("quiz:{}", cache_key_hash)).await
+    }
+
+    // ── Active quiz session caching (DB 2: progress_manager) ─────────────
+
+    /// Simpan sesi quiz aktif ke Redis dengan TTL 4 jam.
+    /// Key: "active_session:{session_id}"
+    pub async fn cache_active_session(
+        con: &mut ConnectionManager,
+        session_id: &str,
+        session: &QuizSession,
+    ) -> RedisResult<()> {
+        let json = serde_json::to_string(session)
+            .map_err(|e| RedisError::from((redis::ErrorKind::TypeError, "JSON serialization failed", e.to_string())))?;
+        con.set_ex(format!("active_session:{}", session_id), json, 14400u64).await
+    }
+
+    /// Ambil sesi quiz aktif dari Redis. Mengembalikan None jika tidak ada atau gagal parse.
+    pub async fn get_active_session(
+        con: &mut ConnectionManager,
+        session_id: &str,
+    ) -> RedisResult<Option<QuizSession>> {
+        let data: Option<String> = con.get(format!("active_session:{}", session_id)).await?;
+        Ok(data.and_then(|json| serde_json::from_str::<QuizSession>(&json).ok()))
+    }
+
+    /// Hapus sesi quiz aktif dari Redis (dipanggil saat sesi selesai).
+    pub async fn delete_active_session(
+        con: &mut ConnectionManager,
+        session_id: &str,
+    ) -> RedisResult<()> {
+        con.del(format!("active_session:{}", session_id)).await
     }
 }
