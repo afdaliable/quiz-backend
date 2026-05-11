@@ -23,7 +23,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
 /// List all exam tracks
 #[get("/tracks")]
 async fn get_all_tracks(data: web::Data<AppState<'_>>) -> impl Responder {
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
         if let Ok(Some(cached)) = RedisService::get_cached_quiz_by_key::<Vec<ExamTrack>>(&mut con, CKEY_TRACKS).await {
@@ -59,7 +59,7 @@ async fn get_categories_by_track(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let slug = path.into_inner();
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     let cache_key = format!("static:track:{}:categories", slug);
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
@@ -96,7 +96,7 @@ async fn get_subcategories_by_category(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let slug = path.into_inner();
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     let cache_key = format!("static:category:{}:subcategories", slug);
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
@@ -133,7 +133,7 @@ async fn get_topics_by_subcategory(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let slug = path.into_inner();
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     let cache_key = format!("static:subcategory:{}:topics", slug);
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
@@ -170,7 +170,7 @@ async fn get_tags_by_topic(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let slug = path.into_inner();
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     let cache_key = format!("static:topic:{}:tags", slug);
     if let Some(redis_pool) = &data.redis_pool {
         let mut con = redis_pool.quiz_cache().as_ref().clone();
@@ -213,7 +213,7 @@ async fn get_taxonomy_tree(data: web::Data<AppState<'_>>) -> impl Responder {
             return HttpResponse::Ok().json(cached);
         }
 
-        let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+        let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
         match dao.get_taxonomy_tree().await {
             Ok(tree) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CACHE_KEY, &tree, TTL).await;
@@ -225,7 +225,7 @@ async fn get_taxonomy_tree(data: web::Data<AppState<'_>>) -> impl Responder {
             }
         }
     } else {
-        let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+        let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
         match dao.get_taxonomy_tree().await {
             Ok(tree) => HttpResponse::Ok().json(tree),
             Err(e) => {
@@ -243,7 +243,7 @@ async fn search_tags(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let search = query.search.as_deref().unwrap_or("");
-    let dao = TaxonomyDao::new(data.context.soal.pool.clone());
+    let dao = TaxonomyDao::new(data.read_context.soal.pool.clone());
     match dao.search_tags(search).await {
         Ok(tags) => HttpResponse::Ok().json(tags),
         Err(e) => {

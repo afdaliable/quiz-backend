@@ -38,7 +38,7 @@ async fn get_soal(
 ) -> impl Responder {
     log_request("GET: /soal", &app_state.connections);
 
-    let soal = app_state.context.soal.get_soal_by_id(&soal_id).await;
+    let soal = app_state.read_context.soal.get_soal_by_id(&soal_id).await;
 
     match soal {
         Err(_) => HttpResponse::NotFound().finish(),
@@ -90,7 +90,7 @@ async fn get_paket_soal_response(
             _ => {
                 println!("Cache miss for paket soal: {}/{}", nama_kategori, nama_paket_soal);
                 // Get from database
-                match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
+                match app_state.read_context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
                     Ok(response) => {
                         // Cache the response for 1 hour
                         if let Err(e) = RedisService::cache_quiz_by_key(&mut con, &cache_key_hash, &response, 3600).await {
@@ -107,7 +107,7 @@ async fn get_paket_soal_response(
         }
     } else {
         // No Redis, get directly from database
-        match app_state.context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
+        match app_state.read_context.paket_soal_response.get_paket_soal_response(&nama_kategori, &nama_paket_soal).await {
             Ok(response) => response,
             Err(e) => {
                 println!("Error: {:?}", e);
@@ -128,7 +128,7 @@ async fn get_paket_soal_response(
         
         if let Some(user_id) = user_id_opt {
             // Check if user has access to this premium quiz package
-            match app_state.context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_response.paket_soal_id).await {
+            match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_response.paket_soal_id).await {
                 Ok(has_access) => {
                     can_access = has_access;
                 },
@@ -145,7 +145,7 @@ async fn get_paket_soal_response(
     
     // Get available premium plans if user cannot access
     let available_plans = if subscription_required && !can_access {
-        match app_state.context.premium_plans.get_all_premium_plans().await {
+        match app_state.read_context.premium_plans.get_all_premium_plans().await {
             Ok(plans) => Some(plans),
             Err(_) => None,
         }
@@ -189,7 +189,7 @@ async fn get_list_paket_soal(
             return HttpResponse::Ok().json(cached);
         }
         println!("[CACHE MISS] /listpaketsoal — fetch from DB");
-        match app_state.context.paket_soal_response.get_list_paket_soal().await {
+        match app_state.read_context.paket_soal_response.get_list_paket_soal().await {
             Ok(list) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL, &list, CACHE_TTL_STATIC).await;
                 HttpResponse::Ok().json(list)
@@ -200,7 +200,7 @@ async fn get_list_paket_soal(
             }
         }
     } else {
-        match app_state.context.paket_soal_response.get_list_paket_soal().await {
+        match app_state.read_context.paket_soal_response.get_list_paket_soal().await {
             Ok(list) => HttpResponse::Ok().json(list),
             Err(e) => {
                 eprintln!("Error: {:?}", e);
@@ -235,7 +235,7 @@ async fn get_paket_soal_by_category(
     log_request("GET: /paket-soal-response/{nama_kategori}", &app_state.connections);
     
     // Get all paket soal responses for the category
-    let paket_soal_responses = match app_state.context.paket_soal_response
+    let paket_soal_responses = match app_state.read_context.paket_soal_response
         .get_paket_soal_by_category(&nama_kategori)
         .await {
             Ok(responses) => responses,
@@ -257,7 +257,7 @@ async fn get_paket_soal_by_category(
         if response.is_premium {
             if let Some(ref user_id) = user_id_opt {
                 // Check if user has access to this premium quiz package
-                match app_state.context.premium_quiz_access.check_user_access_to_quiz(user_id, response.paket_soal_id).await {
+                match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(user_id, response.paket_soal_id).await {
                     Ok(has_access) => {
                         can_access = has_access;
                     },
@@ -294,14 +294,14 @@ async fn get_paket_soal_by_category(
             "#
         )
         .bind(&user_id)
-        .fetch_one(&*app_state.context.user_subscriptions.pool)
+        .fetch_one(&*app_state.read_context.user_subscriptions.pool)
         .await;
         
         match result {
             Ok(count) => {
                 if count == 0 {
                     // User is not premium, get available plans
-                    match app_state.context.premium_plans.get_all_premium_plans().await {
+                    match app_state.read_context.premium_plans.get_all_premium_plans().await {
                         Ok(plans) => Some(plans),
                         Err(_) => None,
                     }
@@ -313,7 +313,7 @@ async fn get_paket_soal_by_category(
         }
     } else {
         // No user ID, get available plans
-        match app_state.context.premium_plans.get_all_premium_plans().await {
+        match app_state.read_context.premium_plans.get_all_premium_plans().await {
             Ok(plans) => Some(plans),
             Err(_) => None,
         }
@@ -351,7 +351,7 @@ async fn get_list_paket_soal_lengkap(
             return HttpResponse::Ok().json(cached);
         }
         println!("[CACHE MISS] /listpaketsoallengkap — fetch from DB");
-        match app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await {
+        match app_state.read_context.paket_soal_response.get_list_paket_soal_lengkap().await {
             Ok(list) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_LIST_PAKET_SOAL_LENGKAP, &list, CACHE_TTL_STATIC).await;
                 HttpResponse::Ok().json(list)
@@ -362,7 +362,7 @@ async fn get_list_paket_soal_lengkap(
             }
         }
     } else {
-        match app_state.context.paket_soal_response.get_list_paket_soal_lengkap().await {
+        match app_state.read_context.paket_soal_response.get_list_paket_soal_lengkap().await {
             Ok(list) => HttpResponse::Ok().json(list),
             Err(e) => {
                 eprintln!("Error: {:?}", e);
@@ -403,7 +403,7 @@ async fn check_quiz_access(
         "SELECT is_premium FROM dbquizapp.paket_soal WHERE id = ?"
     )
     .bind(paket_soal_id)
-    .fetch_optional(&*app_state.context.soal.pool)
+    .fetch_optional(&*app_state.read_context.soal.pool)
     .await;
     
     match is_premium_result {
@@ -424,7 +424,7 @@ async fn check_quiz_access(
             
             if let Some(user_id) = user_id_opt {
                 // Check if user has access to this premium quiz package
-                match app_state.context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_id).await {
+                match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_id).await {
                     Ok(true) => {
                         // User has access
                         HttpResponse::Ok().json(serde_json::json!({
@@ -437,7 +437,7 @@ async fn check_quiz_access(
                     Ok(false) => {
                         // User does not have access
                         // Get available premium plans
-                        let available_plans = match app_state.context.premium_plans.get_all_premium_plans().await {
+                        let available_plans = match app_state.read_context.premium_plans.get_all_premium_plans().await {
                             Ok(plans) => plans,
                             Err(_) => Vec::new(),
                         };
@@ -461,7 +461,7 @@ async fn check_quiz_access(
             } else {
                 // No token provided
                 // Get available premium plans
-                let available_plans = match app_state.context.premium_plans.get_all_premium_plans().await {
+                let available_plans = match app_state.read_context.premium_plans.get_all_premium_plans().await {
                     Ok(plans) => plans,
                     Err(_) => Vec::new(),
                 };
@@ -545,7 +545,7 @@ async fn list_soal(
     let count_sql = format!("SELECT COUNT(*) FROM dbquizapp.soal s WHERE {}", where_clause);
     let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
     for v in &bind_values { count_q = count_q.bind(v); }
-    let total: i64 = count_q.fetch_one(&*app_state.context.soal.pool).await.unwrap_or(0);
+    let total: i64 = count_q.fetch_one(&*app_state.read_context.soal.pool).await.unwrap_or(0);
 
     let list_sql = format!(
         "SELECT s.*, 0 AS usage_count FROM dbquizapp.soal s WHERE {} ORDER BY s.id DESC LIMIT ? OFFSET ?",
@@ -556,7 +556,7 @@ async fn list_soal(
     let questions = list_q
         .bind(limit)
         .bind(offset)
-        .fetch_all(&*app_state.context.soal.pool)
+        .fetch_all(&*app_state.read_context.soal.pool)
         .await
         .unwrap_or_default();
 

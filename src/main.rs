@@ -29,8 +29,18 @@ async fn main() -> std::io::Result<()> {
     let config = Arc::new(Config::from_file(config_file));
     println!("Using configuration file from {0}", config_file);
 
-    let db_context = Database::new(&config.get_database_url()).await;
-    println!("Connected to database: {0}", config.get_database_url());
+    let write_url = config.get_database_url();
+    let read_url = config.get_read_database_url();
+
+    let db_context = Arc::new(Database::new(&write_url).await);
+    println!("Connected to database (write): {}", write_url);
+
+    let read_db_context: Arc<Database<'_>> = if config.has_read_replica() {
+        println!("Connected to database (read replica): {}", read_url);
+        Arc::new(Database::new(&read_url).await)
+    } else {
+        db_context.clone()
+    };
 
     let auth_client = AuthClient::new(
         config.get_auth_url(),
@@ -65,7 +75,8 @@ async fn main() -> std::io::Result<()> {
 
     let app_state = web::Data::new(AppState {
         connections: Mutex::new(0),
-        context: Arc::new(db_context),
+        context: db_context,
+        read_context: read_db_context,
         config: config.clone(),
         auth_client,
         sign_up_with_password_options: SignUpWithPasswordOptions::default(),
