@@ -25,6 +25,8 @@ struct DaoConfig {
     password: String,
     address: String,
     database: String,
+    /// Optional read-replica address (host:port). Falls back to `address` if absent.
+    read_address: Option<String>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -95,6 +97,21 @@ impl Config {
             "mysql://{0}:{1}@{2}/{3}",
             self.dao.user, self.dao.password, self.dao.address, self.dao.database
         )
+    }
+
+    /// Returns the URL for the read replica. If no `read_address` is configured,
+    /// returns the same URL as `get_database_url()` so the caller can share the pool.
+    pub fn get_read_database_url(&self) -> String {
+        let read_address = self.dao.read_address.as_deref()
+            .unwrap_or(&self.dao.address);
+        format!(
+            "mysql://{0}:{1}@{2}/{3}",
+            self.dao.user, self.dao.password, read_address, self.dao.database
+        )
+    }
+
+    pub fn has_read_replica(&self) -> bool {
+        self.dao.read_address.is_some()
     }
 
     pub fn get_api_key(&self) -> &str {

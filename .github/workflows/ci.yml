@@ -38,7 +38,7 @@ jobs:
       run: |
         docker build -t ghcr.io/afdaliable/quiz-backend-prod:latest -t ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }} .
         docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest .
-        
+
         docker push ghcr.io/afdaliable/quiz-backend-prod:latest
         docker push ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }}
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest
@@ -50,11 +50,12 @@ jobs:
         for IMG in $IMAGES; do
           gh api --method DELETE "orgs/${{ github.repository_owner }}/packages/container/quiz-backend-prod/versions/$IMG"
         done
-  
-  deploy:
-    name: Deploy ke Server
-    needs: build 
-    runs-on: self-hosted  
+
+  # ── Deploy to NAS (master node — read/write) ─────────────────────────────
+  deploy-nas:
+    name: Deploy ke NAS
+    needs: build
+    runs-on: [self-hosted, nas]
     steps:
       - name: Log in to GitHub Container Registry
         run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -78,3 +79,62 @@ jobs:
             --restart unless-stopped \
             ghcr.io/afdaliable/quiz-backend-prod:latest \
             /app/quiz-backend
+
+      - name: Tunggu Backend Ready (NAS)
+        run: |
+          echo "Waiting for NAS backend to be ready..."
+          for i in {1..30}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health)
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
+              echo "NAS backend ready (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i/30 - HTTP $STATUS, retrying..."
+            sleep 2
+          done
+          echo "NAS backend did not become ready in time"
+          exit 1
+
+  # ── Deploy to PC (replica node — reads local replica, writes to NAS) ──────
+  deploy-pc:
+    name: Deploy ke PC
+    needs: build
+    runs-on: [self-hosted, pc]
+    steps:
+      - name: Log in to GitHub Container Registry
+        run: echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Pull Image Baru
+        run: docker pull ghcr.io/afdaliable/quiz-backend-prod:latest
+
+      - name: Hentikan & Hapus Container Lama
+        run: |
+          docker stop quiz-backend || true
+          docker rm quiz-backend || true
+
+      - name: Jalankan Container Baru
+        run: |
+          docker run -d --name quiz-backend \
+            -p 8787:8787 \
+            --network quiz-backend_default \
+            -v /opt/quiz-backend/config.json:/app/config.json \
+            -v /opt/quiz-backend/uploads:/data/uploads \
+            --workdir /app \
+            --restart unless-stopped \
+            ghcr.io/afdaliable/quiz-backend-prod:latest \
+            /app/quiz-backend
+
+      - name: Tunggu Backend Ready (PC)
+        run: |
+          echo "Waiting for PC backend to be ready..."
+          for i in {1..30}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health)
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
+              echo "PC backend ready (HTTP $STATUS)"
+              exit 0
+            fi
+            echo "Attempt $i/30 - HTTP $STATUS, retrying..."
+            sleep 2
+          done
+          echo "PC backend did not become ready in time"
+          exit 1

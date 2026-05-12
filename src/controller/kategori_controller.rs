@@ -34,7 +34,7 @@ async fn get_semua_kategori(
             return HttpResponse::Ok().json(cached);
         }
         println!("[CACHE MISS] /semuaKategori — fetch from DB");
-        match app_state.context.kategori.get_all_category().await {
+        match app_state.read_context.kategori.get_all_category().await {
             Ok(categories) => {
                 let _ = RedisService::cache_quiz_by_key(&mut con, CKEY_SEMUA_KATEGORI, &categories, CACHE_TTL_STATIC).await;
                 HttpResponse::Ok().json(categories)
@@ -45,7 +45,7 @@ async fn get_semua_kategori(
             }
         }
     } else {
-        match app_state.context.kategori.get_all_category().await {
+        match app_state.read_context.kategori.get_all_category().await {
             Ok(categories) => HttpResponse::Ok().json(categories),
             Err(e) => {
                 eprintln!("Error: {:?}", e);
