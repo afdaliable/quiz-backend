@@ -93,7 +93,12 @@ jobs:
             sleep 2
           done
           echo "NAS backend did not become ready in time"
+          docker logs quiz-backend --tail 50 || true
           exit 1
+
+      - name: Debug - NAS backend logs (on failure)
+        if: failure()
+        run: docker logs quiz-backend --tail 100 || true
 
   # ── Deploy to PC (replica node — reads local replica, writes to NAS) ──────
   deploy-pc:
