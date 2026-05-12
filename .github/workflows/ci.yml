@@ -84,7 +84,7 @@ jobs:
         run: |
           echo "Waiting for NAS backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health)
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
               echo "NAS backend ready (HTTP $STATUS)"
               exit 0
@@ -128,7 +128,7 @@ jobs:
         run: |
           echo "Waiting for PC backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health)
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
               echo "PC backend ready (HTTP $STATUS)"
               exit 0
