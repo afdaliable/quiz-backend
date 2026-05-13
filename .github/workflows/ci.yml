@@ -84,7 +84,7 @@ jobs:
         run: |
           echo "Waiting for NAS backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
+            STATUS=$(docker exec quiz-backend curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
               echo "NAS backend ready (HTTP $STATUS)"
               exit 0
@@ -95,10 +95,6 @@ jobs:
           echo "NAS backend did not become ready in time"
           docker logs quiz-backend --tail 50 || true
           exit 1
-
-      - name: Debug - NAS backend logs (on failure)
-        if: failure()
-        run: docker logs quiz-backend --tail 100 || true
 
   # ── Deploy to PC (replica node — reads local replica, writes to NAS) ──────
   deploy-pc:
@@ -133,7 +129,7 @@ jobs:
         run: |
           echo "Waiting for PC backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
+            STATUS=$(docker exec quiz-backend curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
             if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
               echo "PC backend ready (HTTP $STATUS)"
               exit 0
