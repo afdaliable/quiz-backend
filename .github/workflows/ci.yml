@@ -84,12 +84,13 @@ jobs:
         run: |
           echo "Waiting for NAS backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(docker exec quiz-backend curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-              echo "NAS backend ready (HTTP $STATUS)"
+            STATE=$(docker inspect quiz-backend --format '{{.State.Status}}' 2>/dev/null) || STATE="unknown"
+            RESTARTING=$(docker inspect quiz-backend --format '{{.State.Restarting}}' 2>/dev/null) || RESTARTING="true"
+            if [ "$STATE" = "running" ] && [ "$RESTARTING" = "false" ]; then
+              echo "NAS backend ready (State=$STATE)"
               exit 0
             fi
-            echo "Attempt $i/30 - HTTP $STATUS, retrying..."
+            echo "Attempt $i/30 - State=$STATE Restarting=$RESTARTING, retrying..."
             sleep 2
           done
           echo "NAS backend did not become ready in time"
@@ -129,13 +130,15 @@ jobs:
         run: |
           echo "Waiting for PC backend to be ready..."
           for i in {1..30}; do
-            STATUS=$(docker exec quiz-backend curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/health 2>/dev/null) || true
-            if [ "$STATUS" = "200" ] || [ "$STATUS" = "401" ]; then
-              echo "PC backend ready (HTTP $STATUS)"
+            STATE=$(docker inspect quiz-backend --format '{{.State.Status}}' 2>/dev/null) || STATE="unknown"
+            RESTARTING=$(docker inspect quiz-backend --format '{{.State.Restarting}}' 2>/dev/null) || RESTARTING="true"
+            if [ "$STATE" = "running" ] && [ "$RESTARTING" = "false" ]; then
+              echo "PC backend ready (State=$STATE)"
               exit 0
             fi
-            echo "Attempt $i/30 - HTTP $STATUS, retrying..."
+            echo "Attempt $i/30 - State=$STATE Restarting=$RESTARTING, retrying..."
             sleep 2
           done
           echo "PC backend did not become ready in time"
+          docker logs quiz-backend --tail 50 || true
           exit 1
