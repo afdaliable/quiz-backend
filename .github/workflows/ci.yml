@@ -28,20 +28,12 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GHCR_TOKEN }}
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
-
     - name: Build and Push Docker Image
       run: |
         docker build -t ghcr.io/afdaliable/quiz-backend-prod:latest -t ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }} .
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest .
 
         docker push ghcr.io/afdaliable/quiz-backend-prod:latest
         docker push ghcr.io/afdaliable/quiz-backend-prod:${{ env.VERSION }}
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/quiz-backend:latest
 
     - name: Delete old images from GHCR
       run: |
