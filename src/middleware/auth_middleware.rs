@@ -122,6 +122,7 @@ const PUBLIC_ROUTES: [&str; 26] = [
     "/users/profile",         // Public profile — no auth required
     "/users/username/check",  // Username availability check — no auth required
     "/static",               // Static file serving — publicly accessible without JWT
+    "/soal/search",          // Public search endpoint — no auth required
 ];
 
 impl<S, B> Transform<S, ServiceRequest> for AuthMiddleware
