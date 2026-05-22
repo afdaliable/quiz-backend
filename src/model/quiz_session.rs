@@ -10,7 +10,8 @@ pub struct QuizSession {
     pub paket_soal_id: Option<i32>,       // NULL untuk random session
     pub kategori_soal: String,
     pub nama_paket_soal: String,
-    pub session_type: String,             // "standard" | "random"
+    pub session_type: String,             // "standard" | "random" | "simulasi" | "study"
+    pub simulasi_id: Option<i32>,         // diisi untuk session_type="simulasi"
     pub question_ids: Option<String>,     // JSON Vec<i32>, diisi untuk random session
     pub current_question: i32,
     pub answers: Option<String>,          // JSON string of Vec<Option<i32>>
@@ -38,6 +39,7 @@ impl<'c> FromRow<'c, MySqlRow> for QuizSession {
             kategori_soal: row.get("kategori_soal"),
             nama_paket_soal: row.get("nama_paket_soal"),
             session_type: row.try_get("session_type").unwrap_or_else(|_| "standard".to_string()),
+            simulasi_id: row.try_get("simulasi_id").ok(),
             question_ids: row.try_get("question_ids").ok(),
             current_question: row.get("current_question"),
             answers: row.get("answers"),

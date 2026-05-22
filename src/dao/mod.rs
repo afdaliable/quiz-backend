@@ -26,6 +26,7 @@ pub mod license_dao;
 pub mod question_feedback_dao;
 pub mod taxonomy_dao;
 pub mod admin_hierarchy_dao;
+pub mod exam_simulation_dao;
 mod passage_dao;
 // mod user_to_group_dao;
 

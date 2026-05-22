@@ -6,8 +6,12 @@ pub struct XpBreakdownResponse {
     pub quiz_complete: i32,
     pub correct_answers: i32,
     pub score_bonus: i32,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub simulasi_bonus: i32,
     pub total: i32,
 }
+
+fn is_zero(n: &i32) -> bool { *n == 0 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct XpAwardResultResponse {
