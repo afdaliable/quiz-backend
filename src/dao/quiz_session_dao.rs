@@ -47,6 +47,7 @@ impl<'c> Table<'c, QuizSession> {
             kategori_soal: request.kategori_soal.clone(),
             nama_paket_soal: request.nama_paket_soal.clone(),
             session_type: "standard".to_string(),
+            simulasi_id: None,
             question_ids: None,
             current_question: 0,
             answers: None,

@@ -6,3 +6,4 @@ pub mod midtrans_service;
 pub mod xp_service;
 pub mod difficulty_service;
 pub mod ai_service;
+pub mod simulasi_generation_service;

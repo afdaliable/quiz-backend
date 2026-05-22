@@ -70,6 +70,7 @@ pub async fn start_random_session(
                     kategori_soal: response.kategori_soal.clone(),
                     nama_paket_soal: response.nama_paket_soal.clone(),
                     session_type: response.session_type.clone(),
+                    simulasi_id: None,
                     question_ids: Some(question_ids_json),
                     current_question: 0,
                     answers: None,
@@ -302,22 +303,63 @@ pub async fn complete_quiz_session(
                 });
             }
 
+            // Simulasi attempt hook — update simulasi_user_attempts + compute passing bonus
+            let (simulasi_bonus, simulasi_passed_for_xp) = if session.session_type == "simulasi" {
+                let pool_sim = state.context.soal.pool.clone();
+                let dao = crate::dao::exam_simulation_dao::ExamSimulationDao::new(pool_sim.clone());
+                // Resolve passing_score for the linked simulasi.
+                let passing = if let Some(sim_id) = session.simulasi_id {
+                    match dao.get_by_id(sim_id).await {
+                        Ok(sim) => sim.passing_score,
+                        Err(_) => 60,
+                    }
+                } else { 60 };
+                let passed = session.score >= passing;
+
+                // Update the attempts row (fire-and-forget).
+                {
+                    let dao2 = crate::dao::exam_simulation_dao::ExamSimulationDao::new(pool_sim.clone());
+                    let sid = session.id.clone();
+                    let score = session.score;
+                    tokio::spawn(async move {
+                        let _ = dao2.complete_attempt(&sid, score, passed).await;
+                    });
+                }
+
+                (if passed { /* +50% bonus, computed below */ 1 } else { 0 }, passed)
+            } else {
+                (0, false)
+            };
+
             // Award XP — fire-and-forget, tidak blok response
             let is_study_mode = session.session_type == "study";
             let breakdown = compute_quiz_xp(session.score, session.correct_answers, is_study_mode);
+
+            // For simulasi that passed, give 50% bonus on base XP total.
+            let simulasi_bonus_value = if simulasi_bonus == 1 && simulasi_passed_for_xp {
+                breakdown.total / 2
+            } else { 0 };
+            let final_total = breakdown.total + simulasi_bonus_value;
 
             let xp_breakdown_resp = XpBreakdownResponse {
                 quiz_complete: breakdown.quiz_complete,
                 correct_answers: breakdown.correct_answers,
                 score_bonus: breakdown.score_bonus,
-                total: breakdown.total,
+                simulasi_bonus: simulasi_bonus_value,
+                total: final_total,
             };
 
             {
                 let pool_xp = state.context.users.pool.clone();
                 let uid_xp = user_id.to_string();
                 let sid_xp = session.id.clone();
-                let bd = breakdown.clone();
+                // Build a breakdown with the bonus included so the awarded XP matches the response.
+                let bd = crate::service::xp_service::QuizXpBreakdown {
+                    quiz_complete:    breakdown.quiz_complete,
+                    correct_answers:  breakdown.correct_answers,
+                    score_bonus:      breakdown.score_bonus + simulasi_bonus_value,
+                    total:            final_total,
+                };
                 tokio::spawn(async move {
                     let _ = award_quiz_xp(&pool_xp, &uid_xp, &sid_xp, &bd).await;
                 });

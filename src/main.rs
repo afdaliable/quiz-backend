@@ -158,6 +158,12 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_subscription_controller)
             .configure(controller::init_analytics_controller)
             .configure(controller::init_ai_controller)
+            // NOTE: init_admin_simulasi_controller MUST come before init_admin_hierarchy_controller
+            // because admin_hierarchy_controller registers a catch-all `web::scope("/admin")`
+            // (for bulk_update_questions, get_question_stats) that would swallow any /admin/* path
+            // registered after it. Actix-web matches scopes in registration order, first-match-wins.
+            .configure(controller::init_admin_simulasi_controller)
+            .configure(quiz_backend::controller::simulasi_ujian_controller::configure_routes)
             .configure(controller::init_admin_hierarchy_controller)
             .configure(quiz_backend::controller::public_profile_controller::configure_routes)
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
