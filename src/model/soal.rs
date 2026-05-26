@@ -406,3 +406,41 @@ pub struct SoalWithPassage {
     pub soal: Soal,
     pub passage: Option<crate::model::passage::PassageSummary>,
 }
+
+/// Lightweight soal projection for Astro SEO static build (AFD-237)
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct SoalSeoItem {
+    pub id: i32,
+    pub soal: String,
+    pub opt1: Option<String>,
+    pub opt2: Option<String>,
+    pub opt3: Option<String>,
+    pub opt4: Option<String>,
+    pub correct_answer: Option<String>,
+    pub solution: String,
+    pub track_slug: String,
+    pub track_name: String,
+    pub category_slug: String,
+    pub category_name: String,
+    pub topic_name: String,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for SoalSeoItem {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(SoalSeoItem {
+            id: row.get("id"),
+            soal: row.get("soal"),
+            opt1: row.try_get("opt1").unwrap_or(None),
+            opt2: row.try_get("opt2").unwrap_or(None),
+            opt3: row.try_get("opt3").unwrap_or(None),
+            opt4: row.try_get("opt4").unwrap_or(None),
+            correct_answer: row.try_get("correct_answer").unwrap_or(None),
+            solution: row.get("solution"),
+            track_slug: row.try_get("track_slug").unwrap_or_else(|_| "lainnya".to_string()),
+            track_name: row.try_get("track_name").unwrap_or_else(|_| "Lainnya".to_string()),
+            category_slug: row.try_get("category_slug").unwrap_or_else(|_| "umum".to_string()),
+            category_name: row.try_get("category_name").unwrap_or_else(|_| "Umum".to_string()),
+            topic_name: row.try_get("topic_name").unwrap_or_else(|_| "".to_string()),
+        })
+    }
+}

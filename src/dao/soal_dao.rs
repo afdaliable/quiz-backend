@@ -2,6 +2,7 @@ use super::Table;
 use super::Soal;
 use sqlx::Error;
 use crate::model::CreateSoalRequest;
+use crate::model::soal::SoalSeoItem;
 
 impl<'c> Table<'c, Soal> {
     pub async fn drop_table(&self) -> Result<(), sqlx::Error> {
@@ -143,6 +144,35 @@ impl<'c> Table<'c, Soal> {
     //     .map(|x|x.rows_affected())
     // }
 
-    
+    pub async fn get_soal_for_seo(&self) -> Result<Vec<SoalSeoItem>, sqlx::Error> {
+        sqlx::query_as::<_, SoalSeoItem>(
+            r#"
+            SELECT
+                s.id,
+                s.soal,
+                s.opt1,
+                s.opt2,
+                s.opt3,
+                s.opt4,
+                s.correct_answer,
+                s.solution,
+                COALESCE(t.slug,  'lainnya') AS track_slug,
+                COALESCE(t.name,  'Lainnya') AS track_name,
+                COALESCE(c.slug,  'umum')    AS category_slug,
+                COALESCE(c.name,  'Umum')    AS category_name,
+                COALESCE(tp.name, '')        AS topic_name
+            FROM soal s
+            LEFT JOIN exam_tracks  t  ON t.id  = s.track_id
+            LEFT JOIN categories   c  ON c.id  = s.category_id
+            LEFT JOIN topics       tp ON tp.id = s.topic_id
+            WHERE s.status = 'active'
+              AND s.solution IS NOT NULL
+              AND s.solution <> ''
+            ORDER BY s.id
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await
+    }
 
 }

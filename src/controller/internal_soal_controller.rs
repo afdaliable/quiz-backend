@@ -1,7 +1,7 @@
 use crate::controller::log_request;
-use crate::model::soal::{CreateSoalRequest, BulkImportResponse};
+use crate::model::soal::{CreateSoalRequest, BulkImportResponse, SoalSeoItem};
 use crate::AppState;
-use actix_web::{web, HttpResponse, HttpRequest, post};
+use actix_web::{web, HttpResponse, HttpRequest, get, post};
 use std::net::IpAddr;
 
 /// Check whether an IP address is from a trusted internal network.
@@ -24,6 +24,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/internal")
             .service(bulk_import_internal)
+            .service(get_soal_seo)
     );
 }
 
@@ -104,4 +105,51 @@ async fn bulk_import_internal(
         failed_count,
         errors,
     })
+}
+
+#[get("/soal/seo")]
+async fn get_soal_seo(
+    req: HttpRequest,
+    data: web::Data<AppState<'_>>,
+) -> HttpResponse {
+    log_request("GET /internal/soal/seo", &data.connections);
+
+    let peer_ip = req.peer_addr().map(|a| a.ip());
+    let ip_allowed = peer_ip.map(is_internal_ip).unwrap_or(false);
+    if !ip_allowed {
+        return HttpResponse::Forbidden().json(serde_json::json!({
+            "error": "Forbidden: request origin not in allowed IP range"
+        }));
+    }
+
+    let expected_key = match data.config.get_internal_api_key() {
+        Some(key) if !key.is_empty() => key,
+        _ => {
+            eprintln!("internal_api_key is not set in config.json");
+            return HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Server misconfiguration: internal_api_key not configured"
+            }));
+        }
+    };
+
+    let provided_key = req
+        .headers()
+        .get("X-Internal-Api-Key")
+        .and_then(|v| v.to_str().ok());
+
+    if provided_key != Some(expected_key) {
+        return HttpResponse::Unauthorized().json(serde_json::json!({
+            "error": "Unauthorized: missing or invalid X-Internal-Api-Key"
+        }));
+    }
+
+    match data.context.soal.get_soal_for_seo().await {
+        Ok(soal_list) => HttpResponse::Ok().json(soal_list),
+        Err(e) => {
+            eprintln!("get_soal_for_seo error: {e}");
+            HttpResponse::InternalServerError().json(serde_json::json!({
+                "error": "Failed to fetch soal for SEO"
+            }))
+        }
+    }
 }
