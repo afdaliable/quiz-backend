@@ -4,6 +4,7 @@ use sqlx::mysql::MySqlRow;
 use sqlx::{FromRow, Row};
 use utoipa::ToSchema;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, ToSchema)]
 pub struct PaketSoal {
@@ -191,4 +192,85 @@ pub struct PreviewDistributionResponse {
     pub total_available: usize,
     pub kode_preview: Option<String>,
     pub sources: Vec<SourceDistributionItem>,
+}
+
+// ── Simulasi Templates ──
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct SimulasiTemplateSection {
+    pub name: String,
+    pub subcategory_slug: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct SimulasiTemplate {
+    pub id: i32,
+    pub exam_type: String,
+    pub kode_prefix: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub sections: Vec<SimulasiTemplateSection>,
+    pub duration_minutes: i32,
+    pub passing_score: i32,
+    pub is_active: bool,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for SimulasiTemplate {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        let sections_json: String = row.try_get("sections").unwrap_or_else(|_| "[]".to_string());
+        let sections: Vec<SimulasiTemplateSection> =
+            serde_json::from_str(&sections_json).unwrap_or_default();
+        Ok(SimulasiTemplate {
+            id: row.get("id"),
+            exam_type: row.get("exam_type"),
+            kode_prefix: row.get("kode_prefix"),
+            name: row.get("name"),
+            description: row.try_get("description").ok(),
+            sections,
+            duration_minutes: row.get("duration_minutes"),
+            passing_score: row.get("passing_score"),
+            is_active: row.get("is_active"),
+        })
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct SimulasiTemplateRequest {
+    pub exam_type: String,
+    pub kode_prefix: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub sections: Vec<SimulasiTemplateSection>,
+    pub duration_minutes: i32,
+    pub passing_score: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct GenerateSimulasiRequest {
+    pub exam_type: String,
+    /// Max 20 per request
+    pub jumlah_paket: u32,
+    /// Display name prefix: "{nama_prefix} #1", "#2", ...
+    pub nama_prefix: String,
+    pub source_balance: Option<bool>,
+    pub is_premium: Option<bool>,
+    /// Auto-create exam_simulations records (default: true)
+    pub create_exam_simulasi: Option<bool>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GeneratedSimulasiItem {
+    pub paket_soal_id: i32,
+    pub exam_simulasi_id: Option<i32>,
+    pub kode_paket: String,
+    pub nama: String,
+    pub total_soal: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct GenerateSimulasiResponse {
+    pub generated: u32,
+    pub packages: Vec<GeneratedSimulasiItem>,
+    pub source_distribution_summary: HashMap<String, String>,
 }

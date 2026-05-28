@@ -5,7 +5,10 @@ use crate::model::paket_soal::{
     UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest,
     PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix,
     PreviewDistributionRequest, PreviewDistributionResponse, SourceDistributionItem,
+    SimulasiTemplate, SimulasiTemplateRequest, GenerateSimulasiRequest, GenerateSimulasiResponse,
+    GeneratedSimulasiItem,
 };
+use std::collections::HashSet;
 use rand::seq::SliceRandom;
 use crate::model::soal::AdminSoal;
 use crate::service::redis_service::RedisService;
@@ -28,6 +31,12 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .wrap(AdminMiddleware::new())
             .service(get_all_packages)
             .service(create_package)
+            // Static paths MUST come before /{id} to avoid capture
+            .service(list_simulasi_templates)
+            .service(create_simulasi_template)
+            .service(update_simulasi_template)
+            .service(generate_simulasi_batch)
+            .service(preview_distribution)
             .service(generate_package)
             .service(get_package_by_id)
             .service(update_package)
@@ -35,7 +44,6 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(get_package_questions)
             .service(add_questions_to_package)
             .service(remove_question_from_package)
-            .service(preview_distribution)
     );
 }
 
@@ -728,7 +736,8 @@ async fn generate_package(
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
-            diff_label,
+            Some(diff_label),
+            &[],
         ).await {
             Ok(c) => c,
             Err(e) => {
@@ -925,7 +934,8 @@ async fn preview_distribution(
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
-            diff_label,
+            Some(diff_label),
+            &[],
         ).await {
             Ok(c) => c,
             Err(e) => {
@@ -983,28 +993,40 @@ async fn preview_distribution(
 }
 
 // ── Helper: fetch candidate (id, source) pairs matching taxonomy + difficulty ──
+//
+// - difficulty: optional — pass None to skip difficulty filter (used by simulasi sections)
+// - exclude_ids: soal to skip (anti-duplicate across batch packages)
 
 async fn fetch_candidates_with_source(
     pool: &sqlx::MySqlPool,
     track_slug: Option<&str>,
     category_slug: Option<&str>,
     subcategory_slug: Option<&str>,
-    difficulty: &str,
+    difficulty: Option<&str>,
+    exclude_ids: &[i32],
 ) -> Result<Vec<(i32, Option<String>)>, sqlx::Error> {
-    let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", "s.difficulty_est = ?"];
-    let mut binds: Vec<String> = vec![difficulty.to_string()];
+    let mut conditions: Vec<String> = vec!["s.status = 'active'".to_string()];
+    let mut binds: Vec<String> = vec![];
 
+    if let Some(d) = difficulty {
+        conditions.push("s.difficulty_est = ?".to_string());
+        binds.push(d.to_string());
+    }
     if let Some(ts) = track_slug {
-        conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
+        conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)".to_string());
         binds.push(ts.to_string());
     }
     if let Some(cs) = category_slug {
-        conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+        conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)".to_string());
         binds.push(cs.to_string());
     }
     if let Some(ss) = subcategory_slug {
-        conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
+        conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)".to_string());
         binds.push(ss.to_string());
+    }
+    if !exclude_ids.is_empty() {
+        let placeholders = exclude_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        conditions.push(format!("s.id NOT IN ({})", placeholders));
     }
 
     let query = format!(
@@ -1015,6 +1037,9 @@ async fn fetch_candidates_with_source(
     let mut q = sqlx::query_as::<_, (i32, Option<String>)>(&query);
     for b in &binds {
         q = q.bind(b);
+    }
+    for id in exclude_ids {
+        q = q.bind(id);
     }
     q.fetch_all(pool).await
 }
@@ -1130,6 +1155,324 @@ async fn peek_kode_preview(
         format!("{}-{}-{:03}", prefix, year, next)
     };
     Ok(kode)
+}
+
+// ── Simulasi Templates CRUD ──
+
+#[get("/simulasi-templates")]
+async fn list_simulasi_templates(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("GET /admin/packages/simulasi-templates", &data.connections);
+    match sqlx::query_as::<_, SimulasiTemplate>(
+        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates ORDER BY id"
+    )
+    .fetch_all(&*data.context.soal.pool)
+    .await
+    {
+        Ok(templates) => HttpResponse::Ok().json(templates),
+        Err(e) => {
+            eprintln!("list_simulasi_templates error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to fetch templates".to_string() })
+        }
+    }
+}
+
+#[post("/simulasi-templates")]
+async fn create_simulasi_template(
+    req: web::Json<SimulasiTemplateRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/packages/simulasi-templates", &data.connections);
+    if req.exam_type.trim().is_empty() || req.kode_prefix.trim().is_empty() || req.name.trim().is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse { error: "exam_type, kode_prefix, and name are required".to_string() });
+    }
+    let sections_json = match serde_json::to_string(&req.sections) {
+        Ok(j) => j,
+        Err(_) => return HttpResponse::BadRequest().json(ErrorResponse { error: "Invalid sections".to_string() }),
+    };
+    let result = sqlx::query(
+        "INSERT INTO simulasi_templates (exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    .bind(req.exam_type.trim())
+    .bind(req.kode_prefix.trim().to_uppercase())
+    .bind(req.name.trim())
+    .bind(&req.description)
+    .bind(&sections_json)
+    .bind(req.duration_minutes)
+    .bind(req.passing_score.unwrap_or(60))
+    .execute(&*data.context.soal.pool)
+    .await;
+
+    match result {
+        Ok(r) => {
+            let id = r.last_insert_id() as i32;
+            match sqlx::query_as::<_, SimulasiTemplate>(
+                "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates WHERE id = ?"
+            )
+            .bind(id)
+            .fetch_one(&*data.context.soal.pool)
+            .await
+            {
+                Ok(t) => HttpResponse::Created().json(t),
+                Err(_) => HttpResponse::Created().json(serde_json::json!({"id": id})),
+            }
+        }
+        Err(e) => {
+            eprintln!("create_simulasi_template error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to create template".to_string() })
+        }
+    }
+}
+
+#[put("/simulasi-templates/{id}")]
+async fn update_simulasi_template(
+    path: web::Path<i32>,
+    req: web::Json<SimulasiTemplateRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("PUT /admin/packages/simulasi-templates/{id}", &data.connections);
+    let template_id = path.into_inner();
+    let sections_json = match serde_json::to_string(&req.sections) {
+        Ok(j) => j,
+        Err(_) => return HttpResponse::BadRequest().json(ErrorResponse { error: "Invalid sections".to_string() }),
+    };
+    let result = sqlx::query(
+        "UPDATE simulasi_templates SET exam_type=?, kode_prefix=?, name=?, description=?, sections=?, duration_minutes=?, passing_score=? WHERE id=?"
+    )
+    .bind(req.exam_type.trim())
+    .bind(req.kode_prefix.trim().to_uppercase())
+    .bind(req.name.trim())
+    .bind(&req.description)
+    .bind(&sections_json)
+    .bind(req.duration_minutes)
+    .bind(req.passing_score.unwrap_or(60))
+    .bind(template_id)
+    .execute(&*data.context.soal.pool)
+    .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => HttpResponse::Ok().json(serde_json::json!({"success": true})),
+        Ok(_) => HttpResponse::NotFound().json(ErrorResponse { error: "Template not found".to_string() }),
+        Err(e) => {
+            eprintln!("update_simulasi_template error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to update template".to_string() })
+        }
+    }
+}
+
+// ── Generate Simulasi Batch ──
+
+#[post("/generate-simulasi")]
+async fn generate_simulasi_batch(
+    req: web::Json<GenerateSimulasiRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/packages/generate-simulasi", &data.connections);
+
+    if req.jumlah_paket == 0 || req.jumlah_paket > 20 {
+        return HttpResponse::BadRequest().json(ErrorResponse { error: "jumlah_paket must be 1–20".to_string() });
+    }
+    if req.nama_prefix.trim().is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse { error: "nama_prefix cannot be empty".to_string() });
+    }
+
+    let pool = &*data.context.soal.pool;
+
+    // Load template
+    let template = match sqlx::query_as::<_, SimulasiTemplate>(
+        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates WHERE exam_type = ? AND is_active = true"
+    )
+    .bind(req.exam_type.trim())
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(t)) => t,
+        Ok(None) => return HttpResponse::BadRequest().json(ErrorResponse { error: format!("Template '{}' not found or inactive", req.exam_type) }),
+        Err(e) => {
+            eprintln!("load template error: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to load template".to_string() });
+        }
+    };
+
+    if template.sections.is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse { error: "Template has no sections".to_string() });
+    }
+
+    let do_balance = req.source_balance.unwrap_or(false);
+    let do_create_simulasi = req.create_exam_simulasi.unwrap_or(true);
+    let is_premium = req.is_premium.unwrap_or(false);
+    let total_per_paket: u32 = template.sections.iter().map(|s| s.count).sum();
+    let year = chrono::Utc::now().year() as u16;
+
+    let mut rng = rand::thread_rng();
+    let mut used_ids: HashSet<i32> = HashSet::new();
+    let mut packages: Vec<GeneratedSimulasiItem> = Vec::with_capacity(req.jumlah_paket as usize);
+    let mut total_source_dist: HashMap<String, usize> = HashMap::new();
+
+    for i in 0..req.jumlah_paket {
+        let nama = format!("{} #{}", req.nama_prefix.trim(), i + 1);
+        let exclude: Vec<i32> = used_ids.iter().copied().collect();
+
+        let mut paket_ids: Vec<i32> = Vec::with_capacity(total_per_paket as usize);
+
+        // Collect soal per section
+        let mut section_ok = true;
+        for section in &template.sections {
+            let candidates = match fetch_candidates_with_source(
+                pool, None, None, Some(&section.subcategory_slug),
+                None, &exclude,
+            ).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("fetch section '{}' error: {:?}", section.name, e);
+                    section_ok = false;
+                    break;
+                }
+            };
+
+            if candidates.len() < section.count as usize {
+                return HttpResponse::BadRequest().json(ErrorResponse {
+                    error: format!(
+                        "Paket #{}: not enough soal for section '{}'. Need {}, available {} (after excluding used).",
+                        i + 1, section.name, section.count, candidates.len()
+                    ),
+                });
+            }
+
+            let (picked, dist) = if do_balance {
+                source_balanced_sample(candidates, section.count as usize, None, &mut rng)
+            } else {
+                let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
+                ids.shuffle(&mut rng);
+                ids.truncate(section.count as usize);
+                (ids, HashMap::new())
+            };
+
+            for (src, n) in dist {
+                *total_source_dist.entry(src).or_insert(0) += n;
+            }
+            paket_ids.extend(&picked);
+            used_ids.extend(&picked);
+        }
+
+        if !section_ok {
+            return HttpResponse::InternalServerError().json(ErrorResponse { error: format!("Failed to fetch soal for paket #{}", i + 1) });
+        }
+
+        // Transaction: paket_soal + items + exam_simulations
+        let mut tx = match pool.begin().await {
+            Ok(tx) => tx,
+            Err(e) => {
+                eprintln!("begin tx error: {:?}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to start transaction".to_string() });
+            }
+        };
+
+        let kode = match generate_kode_paket(&mut tx, &template.kode_prefix, year).await {
+            Ok(k) => k,
+            Err(e) => {
+                let _ = tx.rollback().await;
+                eprintln!("kode_paket error: {:?}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to generate package code".to_string() });
+            }
+        };
+
+        let generation_rules = serde_json::json!({
+            "exam_type": req.exam_type,
+            "source_balance": do_balance,
+            "template_sections": template.sections.iter().map(|s| &s.name).collect::<Vec<_>>(),
+        });
+
+        let paket_id: i32 = match sqlx::query(
+            "INSERT INTO paket_soal (nama_paket_soal, is_premium, is_generated, generation_rules, kode_paket, created_at, updated_at) VALUES (?, ?, 1, ?, ?, NOW(), NOW())"
+        )
+        .bind(&nama)
+        .bind(is_premium)
+        .bind(generation_rules.to_string())
+        .bind(&kode)
+        .execute(&mut *tx)
+        .await
+        {
+            Ok(r) => r.last_insert_id() as i32,
+            Err(e) => {
+                let _ = tx.rollback().await;
+                eprintln!("insert paket_soal error: {:?}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to create package".to_string() });
+            }
+        };
+
+        for question_id in &paket_ids {
+            if let Err(e) = sqlx::query("INSERT INTO paket_soal_items (paket_soal_id, soal_id) VALUES (?, ?)")
+                .bind(paket_id)
+                .bind(question_id)
+                .execute(&mut *tx)
+                .await
+            {
+                let _ = tx.rollback().await;
+                eprintln!("insert item error: {:?}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to insert package questions".to_string() });
+            }
+        }
+
+        let simulasi_id: Option<i32> = if do_create_simulasi {
+            match sqlx::query(
+                "INSERT INTO exam_simulations (nama_simulasi, deskripsi, paket_soal_id, generation_mode, duration_minutes, total_questions, passing_score, is_premium, max_attempts, is_active) VALUES (?, ?, ?, 'simulasi_template', ?, ?, ?, ?, 0, 1)"
+            )
+            .bind(&nama)
+            .bind(&template.description)
+            .bind(paket_id)
+            .bind(template.duration_minutes)
+            .bind(total_per_paket as i32)
+            .bind(template.passing_score)
+            .bind(is_premium)
+            .execute(&mut *tx)
+            .await
+            {
+                Ok(r) => Some(r.last_insert_id() as i32),
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    eprintln!("insert exam_simulations error: {:?}", e);
+                    return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to create exam simulasi record".to_string() });
+                }
+            }
+        } else {
+            None
+        };
+
+        if let Err(e) = tx.commit().await {
+            eprintln!("commit error: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to commit transaction".to_string() });
+        }
+
+        packages.push(GeneratedSimulasiItem {
+            paket_soal_id: paket_id,
+            exam_simulasi_id: simulasi_id,
+            kode_paket: kode,
+            nama,
+            total_soal: total_per_paket,
+        });
+    }
+
+    // Build source distribution summary as percentages
+    let grand_total: usize = total_source_dist.values().sum();
+    let source_distribution_summary: HashMap<String, String> = if grand_total > 0 {
+        total_source_dist.iter()
+            .map(|(src, n)| (src.clone(), format!("~{}%", (n * 100) / grand_total)))
+            .collect()
+    } else {
+        HashMap::new()
+    };
+
+    HttpResponse::Created().json(GenerateSimulasiResponse {
+        generated: packages.len() as u32,
+        packages,
+        source_distribution_summary,
+    })
 }
 
 // ── Helper: get package by ID ──
