@@ -194,6 +194,95 @@ pub struct PreviewDistributionResponse {
     pub sources: Vec<SourceDistributionItem>,
 }
 
+// ── AFD-244: Coverage & Source Distribution ──
+
+/// Single package entry in soal packages list
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SoalPackageItem {
+    pub paket_soal_id: i32,
+    pub nama_paket_soal: String,
+    pub kode_paket: Option<String>,
+    pub is_premium: bool,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for SoalPackageItem {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(SoalPackageItem {
+            paket_soal_id: row.get("paket_soal_id"),
+            nama_paket_soal: row.get("nama_paket_soal"),
+            kode_paket: row.try_get("kode_paket").ok(),
+            is_premium: row.get("is_premium"),
+        })
+    }
+}
+
+/// Response for GET /admin/soal/{id}/packages
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SoalPackagesResponse {
+    pub soal_id: i32,
+    pub packages: Vec<SoalPackageItem>,
+    pub total: usize,
+}
+
+/// Source breakdown entry within a package
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SourceDistributionEntry {
+    pub source: Option<String>,
+    pub count: i64,
+    pub percent: f64,
+}
+
+/// Response for GET /admin/packages/{id}/source-distribution
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PackageSourceDistributionResponse {
+    pub paket_soal_id: i32,
+    pub nama_paket_soal: String,
+    pub total_soal: i64,
+    pub sources: Vec<SourceDistributionEntry>,
+}
+
+/// Single row in the source-distribution-summary list
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PackageSourceSummaryItem {
+    pub paket_soal_id: i32,
+    pub nama_paket_soal: String,
+    pub kode_paket: Option<String>,
+    pub total_soal: i64,
+    pub dominant_source: Option<String>,
+    pub dominant_persen: Option<f64>,
+}
+
+impl<'c> FromRow<'c, MySqlRow> for PackageSourceSummaryItem {
+    fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
+        Ok(PackageSourceSummaryItem {
+            paket_soal_id: row.get("id"),
+            nama_paket_soal: row.get("nama_paket_soal"),
+            kode_paket: row.try_get("kode_paket").ok(),
+            total_soal: row.get("total_soal"),
+            dominant_source: row.try_get("dominant_source").ok(),
+            dominant_persen: row.try_get("dominant_persen").ok(),
+        })
+    }
+}
+
+/// Response for GET /admin/packages/source-distribution-summary
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PackageSourceSummaryResponse {
+    pub packages: Vec<PackageSourceSummaryItem>,
+    pub total: usize,
+}
+
+/// Response for GET /admin/soal/coverage-stats
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SoalCoverageStats {
+    pub total_soal: i64,
+    pub not_in_any_package: i64,
+    pub in_exactly_one_package: i64,
+    pub in_multiple_packages: i64,
+    pub max_package_count: i64,
+    pub avg_package_count: f64,
+}
+
 // ── Simulasi Templates ──
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]

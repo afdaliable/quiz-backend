@@ -7,6 +7,8 @@ use crate::model::paket_soal::{
     PreviewDistributionRequest, PreviewDistributionResponse, SourceDistributionItem,
     SimulasiTemplate, SimulasiTemplateRequest, GenerateSimulasiRequest, GenerateSimulasiResponse,
     GeneratedSimulasiItem,
+    PackageSourceSummaryItem, PackageSourceSummaryResponse,
+    SourceDistributionEntry, PackageSourceDistributionResponse,
 };
 use std::collections::HashSet;
 use rand::seq::SliceRandom;
@@ -38,12 +40,15 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(generate_simulasi_batch)
             .service(preview_distribution)
             .service(generate_package)
+            // AFD-244: static paths before /{id}
+            .service(source_distribution_summary)
             .service(get_package_by_id)
             .service(update_package)
             .service(delete_package)
             .service(get_package_questions)
             .service(add_questions_to_package)
             .service(remove_question_from_package)
+            .service(package_source_distribution)
     );
 }
 
@@ -1460,7 +1465,7 @@ async fn generate_simulasi_batch(
 
     // Build source distribution summary as percentages
     let grand_total: usize = total_source_dist.values().sum();
-    let source_distribution_summary: HashMap<String, String> = if grand_total > 0 {
+    let src_dist_summary: HashMap<String, String> = if grand_total > 0 {
         total_source_dist.iter()
             .map(|(src, n)| (src.clone(), format!("~{}%", (n * 100) / grand_total)))
             .collect()
@@ -1471,8 +1476,144 @@ async fn generate_simulasi_batch(
     HttpResponse::Created().json(GenerateSimulasiResponse {
         generated: packages.len() as u32,
         packages,
-        source_distribution_summary,
+        source_distribution_summary: src_dist_summary,
     })
+}
+
+// ── AFD-244: Source distribution endpoints ──
+
+/// Get source-distribution summary for all packages (dominant source per package)
+#[get("/source-distribution-summary")]
+async fn source_distribution_summary(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("GET /admin/packages/source-distribution-summary", &data.connections);
+
+    let packages = sqlx::query_as::<_, PackageSourceSummaryItem>(
+        r#"
+        SELECT
+            ps.id,
+            ps.nama_paket_soal,
+            ps.kode_paket,
+            total.total_soal,
+            COALESCE(dom.source, 'unknown') AS dominant_source,
+            ROUND(dom.cnt * 100.0 / total.total_soal, 1) AS dominant_persen
+        FROM paket_soal ps
+        JOIN (
+            SELECT paket_soal_id, COUNT(*) AS total_soal
+            FROM paket_soal_items
+            GROUP BY paket_soal_id
+        ) total ON total.paket_soal_id = ps.id
+        LEFT JOIN (
+            SELECT psi.paket_soal_id, s.source, COUNT(*) AS cnt,
+                   ROW_NUMBER() OVER (PARTITION BY psi.paket_soal_id ORDER BY COUNT(*) DESC) AS rn
+            FROM paket_soal_items psi
+            JOIN soal s ON s.id = psi.soal_id
+            GROUP BY psi.paket_soal_id, s.source
+        ) dom ON dom.paket_soal_id = ps.id AND dom.rn = 1
+        ORDER BY dominant_persen DESC
+        "#,
+    )
+    .fetch_all(&*data.context.soal.pool)
+    .await;
+
+    match packages {
+        Ok(pkgs) => {
+            let total = pkgs.len();
+            HttpResponse::Ok().json(PackageSourceSummaryResponse {
+                packages: pkgs,
+                total,
+            })
+        }
+        Err(e) => {
+            eprintln!("source_distribution_summary error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch source distribution summary".to_string(),
+            })
+        }
+    }
+}
+
+/// Get per-source breakdown for a single package
+#[get("/{id}/source-distribution")]
+async fn package_source_distribution(
+    path: web::Path<i32>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let package_id = path.into_inner();
+    log_request("GET /admin/packages/{id}/source-distribution", &data.connections);
+
+    // Verify package exists and get name
+    let header_row = sqlx::query(
+        "SELECT id, nama_paket_soal FROM paket_soal WHERE id = ?",
+    )
+    .bind(package_id)
+    .fetch_optional(&*data.context.soal.pool)
+    .await;
+
+    let header_row = match header_row {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ErrorResponse {
+                error: "Package not found".to_string(),
+            });
+        }
+        Err(e) => {
+            eprintln!("package_source_distribution header error: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch package".to_string(),
+            });
+        }
+    };
+
+    use sqlx::Row;
+    let nama_paket_soal: String = header_row.get("nama_paket_soal");
+
+    // Source breakdown
+    let rows = sqlx::query(
+        r#"
+        SELECT
+            s.source,
+            COUNT(*) AS cnt,
+            COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS pct
+        FROM paket_soal_items psi
+        JOIN soal s ON s.id = psi.soal_id
+        WHERE psi.paket_soal_id = ?
+        GROUP BY s.source
+        ORDER BY cnt DESC
+        "#,
+    )
+    .bind(package_id)
+    .fetch_all(&*data.context.soal.pool)
+    .await;
+
+    match rows {
+        Ok(rs) => {
+            let total_soal: i64 = rs.iter().map(|r| r.get::<i64, _>("cnt")).sum();
+            let sources: Vec<SourceDistributionEntry> = rs
+                .into_iter()
+                .map(|r| SourceDistributionEntry {
+                    source: r.try_get("source").ok(),
+                    count: r.get("cnt"),
+                    percent: r.try_get::<f64, _>("pct").unwrap_or(0.0),
+                })
+                .collect();
+            HttpResponse::Ok().json(PackageSourceDistributionResponse {
+                paket_soal_id: package_id,
+                nama_paket_soal,
+                total_soal,
+                sources,
+            })
+        }
+        Err(e) => {
+            eprintln!("package_source_distribution rows error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch source distribution".to_string(),
+            })
+        }
+    }
 }
 
 // ── Helper: get package by ID ──
