@@ -1,6 +1,7 @@
 use crate::controller::log_request;
 use crate::middleware::admin_middleware::AdminMiddleware;
 use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchRequest, PaginatedQuestionsResponse, BulkImportRequest, BulkImportResponse, CreateSoalRequest, CsvImportRequest, CsvImportResponse, SoalWithTaxonomy};
+use crate::model::paket_soal::{SoalPackageItem, SoalPackagesResponse, SoalCoverageStats};
 use crate::dao::taxonomy_dao::TaxonomyDao;
 use crate::service::csv_import_service::{CsvImportService, CsvImportConfig};
 use crate::AppState;
@@ -32,7 +33,10 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(upload_csv_preview)
             .service(upload_csv_import)
             .service(download_csv_template)
+            // AFD-244: static paths before /{id} wildcard
+            .service(coverage_stats)
             .service(get_question_by_id)
+            .service(get_soal_packages)
             .service(upload_image)
     );
 }
@@ -1104,6 +1108,99 @@ async fn upload_image(
     HttpResponse::Ok().json(serde_json::json!({
         "url": format!("/static/soal-images/{}", filename)
     }))
+}
+
+// ── AFD-244 handlers ──
+
+/// Get coverage statistics: how many soal appear in 0, 1, or multiple packages
+#[get("/coverage-stats")]
+async fn coverage_stats(
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("GET /admin/soal/coverage-stats", &data.connections);
+
+    let row = sqlx::query(
+        r#"
+        SELECT
+            COUNT(*)                         AS total_soal,
+            SUM(pkg_count = 0)               AS not_in_any_package,
+            SUM(pkg_count = 1)               AS in_exactly_one_package,
+            SUM(pkg_count >= 2)              AS in_multiple_packages,
+            MAX(pkg_count)                   AS max_package_count,
+            ROUND(AVG(pkg_count), 4)         AS avg_package_count
+        FROM (
+            SELECT s.id, COUNT(psi.paket_soal_id) AS pkg_count
+            FROM soal s
+            LEFT JOIN paket_soal_items psi ON psi.soal_id = s.id
+            GROUP BY s.id
+        ) sub
+        "#,
+    )
+    .fetch_one(&*data.context.soal.pool)
+    .await;
+
+    match row {
+        Ok(r) => {
+            use sqlx::Row;
+            let stats = SoalCoverageStats {
+                total_soal: r.try_get::<i64, _>("total_soal").unwrap_or(0),
+                not_in_any_package: r.try_get::<i64, _>("not_in_any_package").unwrap_or(0),
+                in_exactly_one_package: r.try_get::<i64, _>("in_exactly_one_package").unwrap_or(0),
+                in_multiple_packages: r.try_get::<i64, _>("in_multiple_packages").unwrap_or(0),
+                max_package_count: r.try_get::<i64, _>("max_package_count").unwrap_or(0),
+                avg_package_count: r.try_get::<f64, _>("avg_package_count").unwrap_or(0.0),
+            };
+            HttpResponse::Ok().json(stats)
+        }
+        Err(e) => {
+            eprintln!("coverage_stats error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to compute coverage stats".to_string(),
+            })
+        }
+    }
+}
+
+/// Get all packages that contain a given soal
+#[get("/{id}/packages")]
+async fn get_soal_packages(
+    path: web::Path<i32>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let soal_id = path.into_inner();
+    log_request("GET /admin/soal/{id}/packages", &data.connections);
+
+    let packages = sqlx::query_as::<_, SoalPackageItem>(
+        r#"
+        SELECT ps.id AS paket_soal_id, ps.nama_paket_soal, ps.kode_paket, ps.is_premium
+        FROM paket_soal_items psi
+        JOIN paket_soal ps ON ps.id = psi.paket_soal_id
+        WHERE psi.soal_id = ?
+        ORDER BY ps.id DESC
+        "#,
+    )
+    .bind(soal_id)
+    .fetch_all(&*data.context.soal.pool)
+    .await;
+
+    match packages {
+        Ok(pkgs) => {
+            let total = pkgs.len();
+            HttpResponse::Ok().json(SoalPackagesResponse {
+                soal_id,
+                packages: pkgs,
+                total,
+            })
+        }
+        Err(e) => {
+            eprintln!("get_soal_packages error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch packages for soal".to_string(),
+            })
+        }
+    }
 }
 
 #[cfg(test)]
