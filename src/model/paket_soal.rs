@@ -148,6 +148,12 @@ pub struct GeneratePackageRequest {
     pub difficulty_mix: DifficultyMix,
     /// Duration in minutes (default: 90)
     pub duration_min: Option<i32>,
+    /// If true, pick questions proportionally from each source
+    pub source_balance: Option<bool>,
+    /// Restrict to specific sources only (empty = all sources)
+    pub allowed_sources: Option<Vec<String>>,
+    /// Prefix for auto-generated package code, e.g. "SKD" → "SKD-2026-001"
+    pub kode_prefix: Option<String>,
 }
 
 /// Response for generate package endpoint
@@ -155,7 +161,34 @@ pub struct GeneratePackageRequest {
 pub struct GeneratePackageResponse {
     pub paket_soal_id: i32,
     pub nama_paket_soal: String,
+    pub kode_paket: Option<String>,
     pub total_questions: u32,
     pub difficulty_mix: DifficultyMix,
     pub selected_question_ids: Vec<i32>,
+}
+
+/// Request for previewing source distribution without generating
+#[derive(Debug, Deserialize, Serialize, ToSchema)]
+pub struct PreviewDistributionRequest {
+    pub track_slug: Option<String>,
+    pub category_slug: Option<String>,
+    pub subcategory_slug: Option<String>,
+    pub difficulty_mix: DifficultyMix,
+    pub source_balance: Option<bool>,
+    pub allowed_sources: Option<Vec<String>>,
+    pub kode_prefix: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct SourceDistributionItem {
+    pub source: String,
+    pub available: usize,
+    pub would_pick: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PreviewDistributionResponse {
+    pub total_available: usize,
+    pub kode_preview: Option<String>,
+    pub sources: Vec<SourceDistributionItem>,
 }

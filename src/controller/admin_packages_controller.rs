@@ -1,6 +1,11 @@
 use crate::controller::log_request;
 use crate::middleware::admin_middleware::AdminMiddleware;
-use crate::model::paket_soal::{PaketSoal, AdminPaketSoal, AdminPaketSoalRequest, CreatePaketSoalRequest, UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest, PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix};
+use crate::model::paket_soal::{
+    PaketSoal, AdminPaketSoal, AdminPaketSoalRequest, CreatePaketSoalRequest,
+    UpdatePaketSoalRequest, PackageSearchRequest, PaginatedPackagesResponse, AddQuestionsRequest,
+    PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix,
+    PreviewDistributionRequest, PreviewDistributionResponse, SourceDistributionItem,
+};
 use rand::seq::SliceRandom;
 use crate::model::soal::AdminSoal;
 use crate::service::redis_service::RedisService;
@@ -8,6 +13,8 @@ use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use std::collections::HashMap;
+use chrono::Datelike;
 
 #[derive(Serialize, Deserialize, ToSchema)]
 pub struct ErrorResponse {
@@ -28,6 +35,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(get_package_questions)
             .service(add_questions_to_package)
             .service(remove_question_from_package)
+            .service(preview_distribution)
     );
 }
 
@@ -700,45 +708,11 @@ async fn generate_package(
     }
 
     let pool = &*data.context.soal.pool;
-
-    // Helper: fetch question IDs matching taxonomy + difficulty filters
-    async fn fetch_candidate_ids(
-        pool: &sqlx::MySqlPool,
-        track_slug: Option<&str>,
-        category_slug: Option<&str>,
-        subcategory_slug: Option<&str>,
-        difficulty: &str,
-    ) -> Result<Vec<i32>, sqlx::Error> {
-        let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", "s.difficulty_est = ?"];
-        let mut binds: Vec<String> = vec![difficulty.to_string()];
-
-        if let Some(ts) = track_slug {
-            conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
-            binds.push(ts.to_string());
-        }
-        if let Some(cs) = category_slug {
-            conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
-            binds.push(cs.to_string());
-        }
-        if let Some(ss) = subcategory_slug {
-            conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
-            binds.push(ss.to_string());
-        }
-
-        let query = format!(
-            "SELECT s.id FROM soal s WHERE {}",
-            conditions.join(" AND ")
-        );
-
-        let mut q = sqlx::query_scalar::<_, i32>(&query);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q.fetch_all(pool).await
-    }
+    let do_balance = req.source_balance.unwrap_or(false);
 
     let mut rng = rand::thread_rng();
     let mut selected_ids: Vec<i32> = Vec::with_capacity(total_needed as usize);
+    let mut total_source_dist: HashMap<String, usize> = HashMap::new();
 
     let difficulties: &[(&str, u32)] = &[
         ("easy",   req.difficulty_mix.easy.unwrap_or(0)),
@@ -749,14 +723,14 @@ async fn generate_package(
     for (diff_label, count) in difficulties {
         if *count == 0 { continue; }
 
-        let candidates = match fetch_candidate_ids(
+        let candidates = match fetch_candidates_with_source(
             pool,
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
             diff_label,
         ).await {
-            Ok(ids) => ids,
+            Ok(c) => c,
             Err(e) => {
                 eprintln!("Error fetching {} candidates: {:?}", diff_label, e);
                 return HttpResponse::InternalServerError().json(ErrorResponse {
@@ -765,33 +739,68 @@ async fn generate_package(
             }
         };
 
-        if candidates.len() < *count as usize {
+        let (picked, dist) = if do_balance {
+            if candidates.len() < *count as usize {
+                return HttpResponse::BadRequest().json(ErrorResponse {
+                    error: format!(
+                        "Not enough {} questions available. Requested {}, found {}.",
+                        diff_label, count, candidates.len()
+                    ),
+                });
+            }
+            source_balanced_sample(
+                candidates,
+                *count as usize,
+                req.allowed_sources.as_deref(),
+                &mut rng,
+            )
+        } else {
+            let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
+            if ids.len() < *count as usize {
+                return HttpResponse::BadRequest().json(ErrorResponse {
+                    error: format!(
+                        "Not enough {} questions available. Requested {}, found {}.",
+                        diff_label, count, ids.len()
+                    ),
+                });
+            }
+            ids.shuffle(&mut rng);
+            ids.truncate(*count as usize);
+            (ids, HashMap::new())
+        };
+
+        if do_balance && picked.len() < *count as usize {
             return HttpResponse::BadRequest().json(ErrorResponse {
                 error: format!(
-                    "Not enough {} questions available. Requested {}, found {}.",
-                    diff_label, count, candidates.len()
+                    "Not enough {} questions after source filtering. Requested {}, got {}.",
+                    diff_label, count, picked.len()
                 ),
             });
         }
 
-        let mut shuffled = candidates;
-        shuffled.shuffle(&mut rng);
-        selected_ids.extend_from_slice(&shuffled[..*count as usize]);
+        for (source, n) in dist {
+            *total_source_dist.entry(source).or_insert(0) += n;
+        }
+        selected_ids.extend(picked);
     }
 
-    // Build JSON values for generation_rules and difficulty_mix columns
-    let generation_rules = serde_json::json!({
+    let mut generation_rules = serde_json::json!({
         "track_slug": req.track_slug,
         "category_slug": req.category_slug,
         "subcategory_slug": req.subcategory_slug,
+        "source_balance": do_balance,
     });
+    if do_balance && !total_source_dist.is_empty() {
+        generation_rules["source_distribution"] =
+            serde_json::to_value(&total_source_dist).unwrap_or_default();
+    }
+
     let difficulty_mix_json = serde_json::json!({
         "easy":   req.difficulty_mix.easy.unwrap_or(0),
         "medium": req.difficulty_mix.medium.unwrap_or(0),
         "hard":   req.difficulty_mix.hard.unwrap_or(0),
     });
 
-    // Start transaction: insert paket_soal + paket_soal_items atomically
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -802,16 +811,38 @@ async fn generate_package(
         }
     };
 
+    let kode_paket: Option<String> = if let Some(ref prefix) = req.kode_prefix {
+        let prefix = prefix.trim().to_uppercase();
+        if prefix.is_empty() {
+            None
+        } else {
+            let year = chrono::Utc::now().year() as u16;
+            match generate_kode_paket(&mut tx, &prefix, year).await {
+                Ok(kode) => Some(kode),
+                Err(e) => {
+                    let _ = tx.rollback().await;
+                    eprintln!("Error generating kode_paket: {:?}", e);
+                    return HttpResponse::InternalServerError().json(ErrorResponse {
+                        error: "Failed to generate package code".to_string(),
+                    });
+                }
+            }
+        }
+    } else {
+        None
+    };
+
     let insert_result = sqlx::query(
         r#"
         INSERT INTO paket_soal
-            (nama_paket_soal, is_premium, is_generated, generation_rules, difficulty_mix, created_at, updated_at)
-        VALUES (?, 0, 1, ?, ?, NOW(), NOW())
+            (nama_paket_soal, is_premium, is_generated, generation_rules, difficulty_mix, kode_paket, created_at, updated_at)
+        VALUES (?, 0, 1, ?, ?, ?, NOW(), NOW())
         "#
     )
     .bind(&req.nama_paket_soal)
     .bind(generation_rules.to_string())
     .bind(difficulty_mix_json.to_string())
+    .bind(&kode_paket)
     .execute(&mut *tx)
     .await;
 
@@ -853,6 +884,7 @@ async fn generate_package(
     HttpResponse::Created().json(GeneratePackageResponse {
         paket_soal_id,
         nama_paket_soal: req.nama_paket_soal.clone(),
+        kode_paket,
         total_questions: total_needed,
         difficulty_mix: DifficultyMix {
             easy: req.difficulty_mix.easy,
@@ -863,7 +895,245 @@ async fn generate_package(
     })
 }
 
-// Helper function to get package by ID
+/// Preview source distribution without generating a package
+#[post("/preview-distribution")]
+async fn preview_distribution(
+    req: web::Json<PreviewDistributionRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("POST /admin/packages/preview-distribution", &data.connections);
+
+    let pool = &*data.context.soal.pool;
+    let mut rng = rand::thread_rng();
+
+    let mut source_available: HashMap<String, usize> = HashMap::new();
+    let mut source_pick: HashMap<String, usize> = HashMap::new();
+    let mut total_available = 0usize;
+
+    let difficulties: &[(&str, u32)] = &[
+        ("easy",   req.difficulty_mix.easy.unwrap_or(0)),
+        ("medium", req.difficulty_mix.medium.unwrap_or(0)),
+        ("hard",   req.difficulty_mix.hard.unwrap_or(0)),
+    ];
+
+    for (diff_label, count) in difficulties {
+        if *count == 0 { continue; }
+
+        let candidates = match fetch_candidates_with_source(
+            pool,
+            req.track_slug.as_deref(),
+            req.category_slug.as_deref(),
+            req.subcategory_slug.as_deref(),
+            diff_label,
+        ).await {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error fetching {} candidates for preview: {:?}", diff_label, e);
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    error: format!("Failed to query {} questions", diff_label),
+                });
+            }
+        };
+
+        for (_, source) in &candidates {
+            let key = source.clone().unwrap_or_else(|| "unknown".to_string());
+            *source_available.entry(key).or_insert(0) += 1;
+        }
+        total_available += candidates.len();
+
+        let pick_count = (*count as usize).min(candidates.len());
+        let (_, dist) = source_balanced_sample(
+            candidates,
+            pick_count,
+            req.allowed_sources.as_deref(),
+            &mut rng,
+        );
+        for (source, n) in dist {
+            *source_pick.entry(source).or_insert(0) += n;
+        }
+    }
+
+    let kode_preview = if let Some(ref prefix) = req.kode_prefix {
+        let prefix = prefix.trim().to_uppercase();
+        if prefix.is_empty() {
+            None
+        } else {
+            let year = chrono::Utc::now().year() as u16;
+            peek_kode_preview(pool, &prefix, year).await.ok()
+        }
+    } else {
+        None
+    };
+
+    let mut sources: Vec<SourceDistributionItem> = source_available
+        .into_iter()
+        .map(|(source, available)| {
+            let would_pick = source_pick.get(&source).copied().unwrap_or(0);
+            SourceDistributionItem { source, available, would_pick }
+        })
+        .collect();
+    sources.sort_by(|a, b| b.would_pick.cmp(&a.would_pick));
+
+    HttpResponse::Ok().json(PreviewDistributionResponse {
+        total_available,
+        kode_preview,
+        sources,
+    })
+}
+
+// ── Helper: fetch candidate (id, source) pairs matching taxonomy + difficulty ──
+
+async fn fetch_candidates_with_source(
+    pool: &sqlx::MySqlPool,
+    track_slug: Option<&str>,
+    category_slug: Option<&str>,
+    subcategory_slug: Option<&str>,
+    difficulty: &str,
+) -> Result<Vec<(i32, Option<String>)>, sqlx::Error> {
+    let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", "s.difficulty_est = ?"];
+    let mut binds: Vec<String> = vec![difficulty.to_string()];
+
+    if let Some(ts) = track_slug {
+        conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
+        binds.push(ts.to_string());
+    }
+    if let Some(cs) = category_slug {
+        conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+        binds.push(cs.to_string());
+    }
+    if let Some(ss) = subcategory_slug {
+        conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
+        binds.push(ss.to_string());
+    }
+
+    let query = format!(
+        "SELECT s.id, s.source FROM soal s WHERE {}",
+        conditions.join(" AND ")
+    );
+
+    let mut q = sqlx::query_as::<_, (i32, Option<String>)>(&query);
+    for b in &binds {
+        q = q.bind(b);
+    }
+    q.fetch_all(pool).await
+}
+
+// ── Helper: proportional source sampling ──
+
+fn source_balanced_sample(
+    candidates: Vec<(i32, Option<String>)>,
+    count: usize,
+    allowed_sources: Option<&[String]>,
+    rng: &mut rand::rngs::ThreadRng,
+) -> (Vec<i32>, HashMap<String, usize>) {
+    // Filter by allowed_sources if specified
+    let filtered: Vec<(i32, String)> = candidates
+        .into_iter()
+        .filter(|(_, source)| {
+            match (allowed_sources, source) {
+                (Some(allowed), Some(s)) => allowed.iter().any(|a| a == s),
+                (Some(_), None) => false,
+                (None, _) => true,
+            }
+        })
+        .map(|(id, source)| (id, source.unwrap_or_else(|| "unknown".to_string())))
+        .collect();
+
+    let mut by_source: HashMap<String, Vec<i32>> = HashMap::new();
+    for (id, source) in filtered {
+        by_source.entry(source).or_default().push(id);
+    }
+
+    if by_source.is_empty() {
+        return (vec![], HashMap::new());
+    }
+
+    for ids in by_source.values_mut() {
+        ids.shuffle(rng);
+    }
+
+    // Sort ascending by available count — handle small sources first
+    let mut source_list: Vec<(String, Vec<i32>)> = by_source.into_iter().collect();
+    source_list.sort_by_key(|(_, ids)| ids.len());
+
+    let mut selected: Vec<i32> = Vec::with_capacity(count);
+    let mut distribution: HashMap<String, usize> = HashMap::new();
+    let mut remaining = count;
+    let total_sources = source_list.len();
+
+    for (i, (source, ids)) in source_list.iter().enumerate() {
+        if remaining == 0 { break; }
+        let sources_left = total_sources - i;
+        let quota = (remaining + sources_left - 1) / sources_left; // ceil
+        let take = quota.min(ids.len()).min(remaining);
+        selected.extend_from_slice(&ids[..take]);
+        distribution.insert(source.clone(), take);
+        remaining -= take;
+    }
+
+    selected.shuffle(rng);
+    (selected, distribution)
+}
+
+// ── Helper: generate kode_paket inside a transaction (race-condition safe) ──
+
+async fn generate_kode_paket(
+    tx: &mut sqlx::Transaction<'_, sqlx::MySql>,
+    prefix: &str,
+    year: u16,
+) -> Result<String, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO paket_kode_sequences (prefix, tahun, last_number) \
+         VALUES (?, ?, 1) ON DUPLICATE KEY UPDATE last_number = last_number + 1"
+    )
+    .bind(prefix)
+    .bind(year)
+    .execute(&mut **tx)
+    .await?;
+
+    let num: i32 = sqlx::query_scalar(
+        "SELECT last_number FROM paket_kode_sequences WHERE prefix = ? AND tahun = ?"
+    )
+    .bind(prefix)
+    .bind(year)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let kode = if num > 999 {
+        format!("{}-{}-{:04}", prefix, year, num)
+    } else {
+        format!("{}-{}-{:03}", prefix, year, num)
+    };
+    Ok(kode)
+}
+
+// ── Helper: peek next kode without incrementing ──
+
+async fn peek_kode_preview(
+    pool: &sqlx::MySqlPool,
+    prefix: &str,
+    year: u16,
+) -> Result<String, sqlx::Error> {
+    let num: Option<i32> = sqlx::query_scalar(
+        "SELECT last_number FROM paket_kode_sequences WHERE prefix = ? AND tahun = ?"
+    )
+    .bind(prefix)
+    .bind(year)
+    .fetch_optional(pool)
+    .await?;
+
+    let next = num.unwrap_or(0) + 1;
+    let kode = if next > 999 {
+        format!("{}-{}-{:04}", prefix, year, next)
+    } else {
+        format!("{}-{}-{:03}", prefix, year, next)
+    };
+    Ok(kode)
+}
+
+// ── Helper: get package by ID ──
+
 async fn get_package_by_id_internal(
     data: &web::Data<AppState<'_>>,
     package_id: i32,
