@@ -23,7 +23,8 @@ pub async fn generate_questions_for_simulasi(
     simulasi: &ExamSimulation,
 ) -> Result<Vec<i32>, String> {
     match simulasi.generation_mode.as_str() {
-        MODE_PAKET => from_paket(pool, simulasi).await,
+        // "simulasi_template" is created by generate_simulasi_batch and uses paket_soal_items
+        MODE_PAKET | "simulasi_template" => from_paket(pool, simulasi).await,
         MODE_SUBCATEGORY => from_composition(pool, simulasi, "subcategory_id").await,
         MODE_TOPIC => from_composition(pool, simulasi, "question_topics_join").await,
         MODE_RANDOM_POOL => from_random_pool(pool, simulasi).await,
