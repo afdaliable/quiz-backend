@@ -175,6 +175,8 @@ pub struct PreviewDistributionRequest {
     pub category_slug: Option<String>,
     pub subcategory_slug: Option<String>,
     pub difficulty_mix: DifficultyMix,
+    /// If difficulty_mix totals 0, pick this many soal ignoring difficulty filter
+    pub total_questions: Option<u32>,
     pub source_balance: Option<bool>,
     pub allowed_sources: Option<Vec<String>>,
     pub kode_prefix: Option<String>,

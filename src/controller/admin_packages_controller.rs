@@ -925,39 +925,35 @@ async fn preview_distribution(
     let mut source_pick: HashMap<String, usize> = HashMap::new();
     let mut total_available = 0usize;
 
-    let difficulties: &[(&str, u32)] = &[
-        ("easy",   req.difficulty_mix.easy.unwrap_or(0)),
-        ("medium", req.difficulty_mix.medium.unwrap_or(0)),
-        ("hard",   req.difficulty_mix.hard.unwrap_or(0)),
-    ];
+    let diff_total = req.difficulty_mix.easy.unwrap_or(0)
+        + req.difficulty_mix.medium.unwrap_or(0)
+        + req.difficulty_mix.hard.unwrap_or(0);
 
-    for (diff_label, count) in difficulties {
-        if *count == 0 { continue; }
-
+    if diff_total == 0 {
+        // No difficulty filter — pick total_questions proportionally from all soal
+        let total_needed = req.total_questions.unwrap_or(100) as usize;
         let candidates = match fetch_candidates_with_source(
             pool,
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
-            Some(diff_label),
+            None, // no difficulty filter
             &[],
         ).await {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Error fetching {} candidates for preview: {:?}", diff_label, e);
+                eprintln!("Error fetching candidates (no-difficulty) for preview: {:?}", e);
                 return HttpResponse::InternalServerError().json(ErrorResponse {
-                    error: format!("Failed to query {} questions", diff_label),
+                    error: "Failed to query questions".to_string(),
                 });
             }
         };
-
         for (_, source) in &candidates {
             let key = source.clone().unwrap_or_else(|| "unknown".to_string());
             *source_available.entry(key).or_insert(0) += 1;
         }
-        total_available += candidates.len();
-
-        let pick_count = (*count as usize).min(candidates.len());
+        total_available = candidates.len();
+        let pick_count = total_needed.min(candidates.len());
         let (_, dist) = source_balanced_sample(
             candidates,
             pick_count,
@@ -966,6 +962,50 @@ async fn preview_distribution(
         );
         for (source, n) in dist {
             *source_pick.entry(source).or_insert(0) += n;
+        }
+    } else {
+        let difficulties: &[(&str, u32)] = &[
+            ("easy",   req.difficulty_mix.easy.unwrap_or(0)),
+            ("medium", req.difficulty_mix.medium.unwrap_or(0)),
+            ("hard",   req.difficulty_mix.hard.unwrap_or(0)),
+        ];
+
+        for (diff_label, count) in difficulties {
+            if *count == 0 { continue; }
+
+            let candidates = match fetch_candidates_with_source(
+                pool,
+                req.track_slug.as_deref(),
+                req.category_slug.as_deref(),
+                req.subcategory_slug.as_deref(),
+                Some(diff_label),
+                &[],
+            ).await {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Error fetching {} candidates for preview: {:?}", diff_label, e);
+                    return HttpResponse::InternalServerError().json(ErrorResponse {
+                        error: format!("Failed to query {} questions", diff_label),
+                    });
+                }
+            };
+
+            for (_, source) in &candidates {
+                let key = source.clone().unwrap_or_else(|| "unknown".to_string());
+                *source_available.entry(key).or_insert(0) += 1;
+            }
+            total_available += candidates.len();
+
+            let pick_count = (*count as usize).min(candidates.len());
+            let (_, dist) = source_balanced_sample(
+                candidates,
+                pick_count,
+                req.allowed_sources.as_deref(),
+                &mut rng,
+            );
+            for (source, n) in dist {
+                *source_pick.entry(source).or_insert(0) += n;
+            }
         }
     }
 
