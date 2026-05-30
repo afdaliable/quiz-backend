@@ -1360,7 +1360,7 @@ async fn generate_simulasi_batch(
     let mut total_source_dist: HashMap<String, usize> = HashMap::new();
 
     for i in 0..req.jumlah_paket {
-        let nama = format!("{} #{}", req.nama_prefix.trim(), i + 1);
+        let nama = format!("{} Paket {}", req.nama_prefix.trim(), i + 1);
         let exclude: Vec<i32> = used_ids.iter().copied().collect();
 
         let mut paket_ids: Vec<i32> = Vec::with_capacity(total_per_paket as usize);
