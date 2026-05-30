@@ -1211,7 +1211,7 @@ async fn list_simulasi_templates(
 ) -> impl Responder {
     log_request("GET /admin/packages/simulasi-templates", &data.connections);
     match sqlx::query_as::<_, SimulasiTemplate>(
-        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates ORDER BY id"
+        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active, navigation_mode FROM simulasi_templates ORDER BY id"
     )
     .fetch_all(&*data.context.soal.pool)
     .await
@@ -1239,7 +1239,7 @@ async fn create_simulasi_template(
         Err(_) => return HttpResponse::BadRequest().json(ErrorResponse { error: "Invalid sections".to_string() }),
     };
     let result = sqlx::query(
-        "INSERT INTO simulasi_templates (exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO simulasi_templates (exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, navigation_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     )
     .bind(req.exam_type.trim())
     .bind(req.kode_prefix.trim().to_uppercase())
@@ -1248,6 +1248,7 @@ async fn create_simulasi_template(
     .bind(&sections_json)
     .bind(req.duration_minutes)
     .bind(req.passing_score.unwrap_or(60))
+    .bind(req.navigation_mode.as_deref().unwrap_or("free"))
     .execute(&*data.context.soal.pool)
     .await;
 
@@ -1255,7 +1256,7 @@ async fn create_simulasi_template(
         Ok(r) => {
             let id = r.last_insert_id() as i32;
             match sqlx::query_as::<_, SimulasiTemplate>(
-                "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates WHERE id = ?"
+                "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active, navigation_mode FROM simulasi_templates WHERE id = ?"
             )
             .bind(id)
             .fetch_one(&*data.context.soal.pool)
@@ -1286,7 +1287,7 @@ async fn update_simulasi_template(
         Err(_) => return HttpResponse::BadRequest().json(ErrorResponse { error: "Invalid sections".to_string() }),
     };
     let result = sqlx::query(
-        "UPDATE simulasi_templates SET exam_type=?, kode_prefix=?, name=?, description=?, sections=?, duration_minutes=?, passing_score=? WHERE id=?"
+        "UPDATE simulasi_templates SET exam_type=?, kode_prefix=?, name=?, description=?, sections=?, duration_minutes=?, passing_score=?, navigation_mode=? WHERE id=?"
     )
     .bind(req.exam_type.trim())
     .bind(req.kode_prefix.trim().to_uppercase())
@@ -1295,6 +1296,7 @@ async fn update_simulasi_template(
     .bind(&sections_json)
     .bind(req.duration_minutes)
     .bind(req.passing_score.unwrap_or(60))
+    .bind(req.navigation_mode.as_deref().unwrap_or("free"))
     .bind(template_id)
     .execute(&*data.context.soal.pool)
     .await;

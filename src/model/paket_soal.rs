@@ -292,6 +292,8 @@ pub struct SimulasiTemplateSection {
     pub name: String,
     pub subcategory_slug: String,
     pub count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section_duration_minutes: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
@@ -305,6 +307,7 @@ pub struct SimulasiTemplate {
     pub duration_minutes: i32,
     pub passing_score: i32,
     pub is_active: bool,
+    pub navigation_mode: String,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for SimulasiTemplate {
@@ -322,6 +325,7 @@ impl<'c> FromRow<'c, MySqlRow> for SimulasiTemplate {
             duration_minutes: row.get("duration_minutes"),
             passing_score: row.get("passing_score"),
             is_active: row.get("is_active"),
+            navigation_mode: row.try_get("navigation_mode").unwrap_or_else(|_| "free".to_string()),
         })
     }
 }
@@ -335,6 +339,7 @@ pub struct SimulasiTemplateRequest {
     pub sections: Vec<SimulasiTemplateSection>,
     pub duration_minutes: i32,
     pub passing_score: Option<i32>,
+    pub navigation_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
