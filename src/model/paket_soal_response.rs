@@ -35,6 +35,11 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoalResponse {
                 opt4: row.get("opt4"),
                 opt5: row.get("opt5"),
                 correct_answer: row.get("correct_answer"),
+                option_scores: row
+                    .try_get::<Option<String>, _>("option_scores")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok()),
                 solution: row.get("solution"),
                 sumberfile: row.get("sumberfile"),
                 modul: row.get("modul"),

@@ -28,6 +28,8 @@ pub struct Soal {
     pub opt5: Option<String>,
     /// The correct answer
     pub correct_answer: Option<String>,
+    /// Per-option scores for TKP-style questions (JSON object, e.g. {"1":5,"2":3,"3":1})
+    pub option_scores: Option<serde_json::Value>,
     /// Solution explanation
     pub solution: Option<String>,
     /// Source file
@@ -124,6 +126,11 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             opt4: row.get("opt4"),
             opt5: row.get("opt5"),
             correct_answer: row.get("correct_answer"),
+            option_scores: row
+                .try_get::<Option<String>, _>("option_scores")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             solution: row.get("solution"),
             sumberfile: row.get("sumberfile"),
             modul: row.get("modul"),
@@ -170,6 +177,8 @@ pub struct AdminSoal {
     pub opt5: Option<String>,
     /// The correct answer
     pub correct_answer: Option<String>,
+    /// Per-option scores for TKP-style questions (JSON object, e.g. {"1":5,"2":3,"3":1})
+    pub option_scores: Option<serde_json::Value>,
     /// Solution explanation
     pub solution: Option<String>,
     /// Source file
@@ -224,6 +233,11 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             opt4: row.get("opt4"),
             opt5: row.get("opt5"),
             correct_answer: row.get("correct_answer"),
+            option_scores: row
+                .try_get::<Option<String>, _>("option_scores")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             solution: row.get("solution"),
             sumberfile: row.get("sumberfile"),
             modul: row.get("modul"),
