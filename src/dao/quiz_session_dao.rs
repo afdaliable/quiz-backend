@@ -604,7 +604,7 @@ impl<'c> Table<'c, QuizSession> {
 
         let placeholders = question_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let query_str = format!(
-            "SELECT id, correct_answer FROM soal WHERE id IN ({})",
+            "SELECT id, correct_answer, question_type, option_scores FROM soal WHERE id IN ({})",
             placeholders
         );
         let mut q = sqlx::query(&query_str);
@@ -613,44 +613,68 @@ impl<'c> Table<'c, QuizSession> {
         }
         let rows = q.fetch_all(&*self.pool).await?;
 
-        // Build map id → correct_answer
-        let correct_map: HashMap<i32, String> = rows
+        // Build map id → (correct_answer, question_type, option_scores)
+        let soal_map: HashMap<i32, (String, String, Option<serde_json::Value>)> = rows
             .into_iter()
             .filter_map(|row| {
                 let id: i32 = row.get("id");
                 let ca: Option<String> = row.get("correct_answer");
-                ca.map(|c| (id, c))
+                let qt: String = row.try_get("question_type")
+                    .unwrap_or_else(|_| "multiple_choice".to_string());
+                let os: Option<serde_json::Value> = row
+                    .try_get::<Option<String>, _>("option_scores")
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok());
+                ca.map(|c| (id, (c, qt, os)))
             })
             .collect();
 
+        let mut raw_score = 0i32;
+        let mut max_score = 0i32;
         let mut correct_count = 0i32;
         let mut incorrect_count = 0i32;
 
-        // Iterate question_ids in shuffled order — matches user_answers index
         for (index, qid) in question_ids.iter().enumerate() {
-            if let Some(user_answer) = user_answers.get(index).and_then(|a| *a) {
-                if let Some(correct_answer) = correct_map.get(qid) {
-                    let correct_index = match correct_answer.as_str() {
-                        "opt1" => 0,
-                        "opt2" => 1,
-                        "opt3" => 2,
-                        "opt4" => 3,
-                        "opt5" => 4,
-                        _ => 999,
-                    };
-                    if user_answer == correct_index {
+            let user_answer_idx: Option<i32> = user_answers
+                .get(index)
+                .and_then(|a| *a);
+
+            if let Some((correct_answer, question_type, option_scores)) = soal_map.get(qid) {
+                max_score += 5;
+
+                let Some(ans_idx) = user_answer_idx else {
+                    continue; // unanswered — contributes 0
+                };
+
+                let opt_key = match ans_idx {
+                    0 => "opt1", 1 => "opt2", 2 => "opt3", 3 => "opt4", 4 => "opt5",
+                    _ => continue,
+                };
+
+                if question_type == "tkp" {
+                    let poin = option_scores
+                        .as_ref()
+                        .and_then(|os| os.get(opt_key))
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(1) as i32; // min 1 if lookup fails
+                    raw_score += poin;
+                    if poin == 5 {
+                        correct_count += 1;
+                    }
+                } else {
+                    if opt_key == correct_answer.as_str() {
+                        raw_score += 5;
                         correct_count += 1;
                     } else {
                         incorrect_count += 1;
                     }
                 }
             }
-            // None = tidak dijawab, tidak dihitung salah
         }
 
-        let total = question_ids.len() as i32;
-        let score = if total > 0 {
-            (correct_count as f32 / total as f32 * 100.0).round() as i32
+        let score = if max_score > 0 {
+            (raw_score as f32 / max_score as f32 * 100.0).round() as i32
         } else {
             0
         };
@@ -666,7 +690,7 @@ impl<'c> Table<'c, QuizSession> {
     ) -> Result<(i32, i32, i32), Error> {
         let paket_response = sqlx::query(
             r#"
-            SELECT s.correct_answer
+            SELECT s.correct_answer, s.question_type, s.option_scores
             FROM kategori_soal ks
             JOIN paket_soal ps ON ks.id = ps.kategori_id
             JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id
@@ -680,35 +704,55 @@ impl<'c> Table<'c, QuizSession> {
         .fetch_all(&*self.pool)
         .await?;
 
-        let mut correct_count = 0;
-        let mut incorrect_count = 0;
+        let mut raw_score = 0i32;
+        let mut max_score = 0i32;
+        let mut correct_count = 0i32;
+        let mut incorrect_count = 0i32;
 
         for (index, row) in paket_response.iter().enumerate() {
-            if let Some(user_answer) = user_answers.get(index) {
-                if let Some(user_answer) = user_answer {
-                    let correct_answer: String = row.get("correct_answer");
+            let correct_answer: String = row.get("correct_answer");
+            let question_type: String = row.try_get("question_type")
+                .unwrap_or_else(|_| "multiple_choice".to_string());
+            let option_scores: Option<serde_json::Value> = row
+                .try_get::<Option<String>, _>("option_scores")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok());
 
-                    let correct_index = match correct_answer.as_str() {
-                        "opt1" => 0,
-                        "opt2" => 1,
-                        "opt3" => 2,
-                        "opt4" => 3,
-                        "opt5" => 4,
-                        _ => 999,
-                    };
+            max_score += 5;
 
-                    if *user_answer == correct_index {
-                        correct_count += 1;
-                    } else {
-                        incorrect_count += 1;
-                    }
+            let Some(user_answer_idx) = user_answers.get(index).and_then(|a| *a) else {
+                continue;
+            };
+
+            let opt_key = match user_answer_idx {
+                0 => "opt1", 1 => "opt2", 2 => "opt3", 3 => "opt4", 4 => "opt5",
+                _ => continue,
+            };
+
+            if question_type == "tkp" {
+                let poin = option_scores
+                    .as_ref()
+                    .and_then(|os| os.get(opt_key))
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(1) as i32;
+                raw_score += poin;
+                if poin == 5 {
+                    correct_count += 1;
+                }
+            } else {
+                if opt_key == correct_answer.as_str() {
+                    raw_score += 5;
+                    correct_count += 1;
+                } else {
+                    incorrect_count += 1;
                 }
             }
         }
 
         let total_questions = paket_response.len() as i32;
         let score = if total_questions > 0 {
-            (correct_count as f32 / total_questions as f32 * 100.0).round() as i32
+            (raw_score as f32 / (total_questions * 5) as f32 * 100.0).round() as i32
         } else {
             0
         };
