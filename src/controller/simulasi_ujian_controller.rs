@@ -102,7 +102,7 @@ async fn start_simulasi(
     // Fetch question payload (mirror RandomSessionSoal shape, withholding correct_answer).
     let placeholders = question_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
     let rows_sql = format!(
-        "SELECT id, soal, question_type, opt1, opt2, opt3, opt4, opt5, solution, modul, pelajaran, tag \
+        "SELECT id, soal, question_type, opt1, opt2, opt3, opt4, opt5, solution, modul, pelajaran, tag, option_scores \
          FROM soal WHERE id IN ({})",
         placeholders
     );
@@ -132,6 +132,11 @@ async fn start_simulasi(
             "modul":         row.try_get::<Option<String>, _>("modul").ok().flatten(),
             "pelajaran":     row.try_get::<Option<String>, _>("pelajaran").ok().flatten(),
             "tag":           row.try_get::<Option<String>, _>("tag").ok().flatten(),
+            "option_scores": row
+                .try_get::<Option<String>, _>("option_scores")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
         }));
     }
     let questions: Vec<JsonValue> = question_ids.iter()

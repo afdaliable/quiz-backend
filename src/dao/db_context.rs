@@ -125,12 +125,13 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
     pub async fn get_paket_soal_response(&self, nama_kategori: &String, nama_paket_soal: &String) -> Result<PaketSoalResponse, sqlx::Error> {
         let query = r#"
             SELECT ks.id as kategori_id, ks.nama_kategori, ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
-                   s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution,
+                   s.id as soal_id, s.soal, s.question_type, s.option_scores,
+                   s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution,
                    s.sumberfile, s.modul, s.pelajaran, s.tag
-            FROM kategori_soal ks 
-            JOIN paket_soal ps ON ks.id = ps.kategori_id 
-            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
-            JOIN soal s ON psi.soal_id = s.id 
+            FROM kategori_soal ks
+            JOIN paket_soal ps ON ks.id = ps.kategori_id
+            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id
+            JOIN soal s ON psi.soal_id = s.id
             WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ?
             "#;
         
@@ -178,15 +179,15 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
     pub async fn get_paket_soal_by_category(&self, nama_kategori: &String) -> Result<Vec<PaketSoalResponse>, sqlx::Error> {
         let results = sqlx::query_as::<_, PaketSoalResponse>(
             r#"
-            SELECT ks.id as kategori_id, ks.nama_kategori, 
+            SELECT ks.id as kategori_id, ks.nama_kategori,
                    ps.id as paket_soal_id, ps.nama_paket_soal, ps.is_premium,
-                   s.id as soal_id, s.soal, s.opt1, s.opt2, s.opt3, 
-                   s.opt4, s.opt5, s.correct_answer, s.solution,
+                   s.id as soal_id, s.soal, s.question_type, s.option_scores,
+                   s.opt1, s.opt2, s.opt3, s.opt4, s.opt5, s.correct_answer, s.solution,
                    s.sumberfile, s.modul, s.pelajaran, s.tag
-            FROM kategori_soal ks 
-            JOIN paket_soal ps ON ks.id = ps.kategori_id 
-            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id 
-            JOIN soal s ON psi.soal_id = s.id 
+            FROM kategori_soal ks
+            JOIN paket_soal ps ON ks.id = ps.kategori_id
+            JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id
+            JOIN soal s ON psi.soal_id = s.id
             WHERE ks.nama_kategori = ?
             ORDER BY ps.nama_paket_soal, s.id
             "#,
