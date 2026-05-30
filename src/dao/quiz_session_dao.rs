@@ -626,7 +626,7 @@ impl<'c> Table<'c, QuizSession> {
                     .ok()
                     .flatten()
                     .and_then(|s| serde_json::from_str(&s).ok());
-                ca.map(|c| (id, (c, qt, os)))
+                Some((id, (ca.unwrap_or_default(), qt, os)))
             })
             .collect();
 
@@ -640,8 +640,9 @@ impl<'c> Table<'c, QuizSession> {
                 .get(index)
                 .and_then(|a| *a);
 
+            max_score += 5;
+
             if let Some((correct_answer, question_type, option_scores)) = soal_map.get(qid) {
-                max_score += 5;
 
                 let Some(ans_idx) = user_answer_idx else {
                     continue; // unanswered — contributes 0
@@ -659,9 +660,7 @@ impl<'c> Table<'c, QuizSession> {
                         .and_then(|v| v.as_i64())
                         .unwrap_or(1) as i32; // min 1 if lookup fails
                     raw_score += poin;
-                    if poin == 5 {
-                        correct_count += 1;
-                    }
+                    correct_count += 1; // any answered TKP = correct (no concept of "wrong" in TKP)
                 } else {
                     if opt_key == correct_answer.as_str() {
                         raw_score += 5;
@@ -737,9 +736,7 @@ impl<'c> Table<'c, QuizSession> {
                     .and_then(|v| v.as_i64())
                     .unwrap_or(1) as i32;
                 raw_score += poin;
-                if poin == 5 {
-                    correct_count += 1;
-                }
+                correct_count += 1; // any answered TKP = correct (no concept of "wrong" in TKP)
             } else {
                 if opt_key == correct_answer.as_str() {
                     raw_score += 5;
