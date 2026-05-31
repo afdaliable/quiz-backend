@@ -274,6 +274,29 @@ pub struct PackageSourceSummaryResponse {
     pub total: usize,
 }
 
+// ── AFD-249: Track source discovery ──
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct TrackSourcesQuery {
+    pub track_slug: Option<String>,
+    pub subcategory_slug: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackSourceEntry {
+    pub source: String,
+    pub count: i64,
+    pub pct: f64,
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct TrackSourcesResponse {
+    pub track_slug: Option<String>,
+    pub subcategory_slug: Option<String>,
+    pub sources: Vec<TrackSourceEntry>,
+    pub total_soal: i64,
+}
+
 /// Response for GET /admin/soal/coverage-stats
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct SoalCoverageStats {

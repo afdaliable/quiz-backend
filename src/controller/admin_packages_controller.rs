@@ -9,6 +9,7 @@ use crate::model::paket_soal::{
     GeneratedSimulasiItem,
     PackageSourceSummaryItem, PackageSourceSummaryResponse,
     SourceDistributionEntry, PackageSourceDistributionResponse,
+    TrackSourcesQuery, TrackSourceEntry, TrackSourcesResponse,
 };
 use std::collections::HashSet;
 use rand::seq::SliceRandom;
@@ -40,8 +41,9 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(generate_simulasi_batch)
             .service(preview_distribution)
             .service(generate_package)
-            // AFD-244: static paths before /{id}
+            // AFD-244/249: static paths before /{id}
             .service(source_distribution_summary)
+            .service(track_sources)
             .service(get_package_by_id)
             .service(update_package)
             .service(delete_package)
@@ -1575,6 +1577,79 @@ async fn source_distribution_summary(
             eprintln!("source_distribution_summary error: {:?}", e);
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Failed to fetch source distribution summary".to_string(),
+            })
+        }
+    }
+}
+
+/// AFD-249: Discover available sources for a given track or subcategory
+#[get("/track-sources")]
+async fn track_sources(
+    query: web::Query<TrackSourcesQuery>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("GET /admin/packages/track-sources", &data.connections);
+    let pool = &*data.context.soal.pool;
+
+    let mut conditions = vec!["s.status = 'active'".to_string()];
+    let mut binds: Vec<String> = vec![];
+
+    if let Some(ref ts) = query.track_slug {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)".to_string(),
+        );
+        binds.push(ts.clone());
+    }
+    if let Some(ref ss) = query.subcategory_slug {
+        conditions.push(
+            "EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)".to_string(),
+        );
+        binds.push(ss.clone());
+    }
+
+    let where_clause = conditions.join(" AND ");
+    let sql = format!(
+        r#"
+        SELECT
+            COALESCE(s.source, 'unknown') AS source,
+            COUNT(*) AS count,
+            CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS DOUBLE) AS pct
+        FROM soal s
+        WHERE {where_clause}
+        GROUP BY COALESCE(s.source, 'unknown')
+        ORDER BY count DESC
+        "#
+    );
+
+    let mut q = sqlx::query(&sql);
+    for b in &binds {
+        q = q.bind(b);
+    }
+
+    match q.fetch_all(pool).await {
+        Ok(rows) => {
+            use sqlx::Row;
+            let total_soal: i64 = rows.iter().map(|r| r.get::<i64, _>("count")).sum();
+            let sources: Vec<TrackSourceEntry> = rows
+                .into_iter()
+                .map(|r| TrackSourceEntry {
+                    source: r.get("source"),
+                    count: r.get("count"),
+                    pct: r.try_get::<f64, _>("pct").unwrap_or(0.0),
+                })
+                .collect();
+            HttpResponse::Ok().json(TrackSourcesResponse {
+                track_slug: query.track_slug.clone(),
+                subcategory_slug: query.subcategory_slug.clone(),
+                sources,
+                total_soal,
+            })
+        }
+        Err(e) => {
+            eprintln!("track_sources error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch track sources".to_string(),
             })
         }
     }
