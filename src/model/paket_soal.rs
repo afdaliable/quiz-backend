@@ -168,6 +168,14 @@ pub struct GeneratePackageResponse {
     pub selected_question_ids: Vec<i32>,
 }
 
+/// Per-source weight for weighted sampling — AFD-250
+#[derive(Debug, Deserialize, Serialize, Clone, ToSchema)]
+pub struct SourceWeight {
+    pub source: String,
+    /// Weight 0–100; values are normalized, so total doesn't need to equal 100
+    pub weight: f32,
+}
+
 /// Request for previewing source distribution without generating
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct PreviewDistributionRequest {
@@ -179,6 +187,8 @@ pub struct PreviewDistributionRequest {
     pub total_questions: Option<u32>,
     pub source_balance: Option<bool>,
     pub allowed_sources: Option<Vec<String>>,
+    /// Custom per-source weights; overrides equal-balance when provided
+    pub source_weights: Option<Vec<SourceWeight>>,
     pub kode_prefix: Option<String>,
 }
 
@@ -375,6 +385,8 @@ pub struct GenerateSimulasiRequest {
     pub source_balance: Option<bool>,
     /// Restrict sampling to these sources only (empty = all sources)
     pub allowed_sources: Option<Vec<String>>,
+    /// Custom per-source weights; overrides equal-balance when provided
+    pub source_weights: Option<Vec<SourceWeight>>,
     pub is_premium: Option<bool>,
     /// Auto-create exam_simulations records (default: true)
     pub create_exam_simulasi: Option<bool>,

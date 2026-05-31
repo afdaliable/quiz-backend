@@ -6,7 +6,7 @@ use crate::model::paket_soal::{
     PackageOperationResponse, GeneratePackageRequest, GeneratePackageResponse, DifficultyMix,
     PreviewDistributionRequest, PreviewDistributionResponse, SourceDistributionItem,
     SimulasiTemplate, SimulasiTemplateRequest, GenerateSimulasiRequest, GenerateSimulasiResponse,
-    GeneratedSimulasiItem,
+    GeneratedSimulasiItem, SourceWeight,
     PackageSourceSummaryItem, PackageSourceSummaryResponse,
     SourceDistributionEntry, PackageSourceDistributionResponse,
     TrackSourcesQuery, TrackSourceEntry, TrackSourcesResponse,
@@ -768,6 +768,7 @@ async fn generate_package(
                 candidates,
                 *count as usize,
                 req.allowed_sources.as_deref(),
+                None,
                 &mut rng,
             )
         } else {
@@ -960,6 +961,7 @@ async fn preview_distribution(
             candidates,
             pick_count,
             req.allowed_sources.as_deref(),
+            req.source_weights.as_deref(),
             &mut rng,
         );
         for (source, n) in dist {
@@ -1003,6 +1005,7 @@ async fn preview_distribution(
                 candidates,
                 pick_count,
                 req.allowed_sources.as_deref(),
+                req.source_weights.as_deref(),
                 &mut rng,
             );
             for (source, n) in dist {
@@ -1097,13 +1100,18 @@ fn source_balanced_sample(
     candidates: Vec<(i32, Option<String>)>,
     count: usize,
     allowed_sources: Option<&[String]>,
+    source_weights: Option<&[SourceWeight]>,
     rng: &mut rand::rngs::ThreadRng,
 ) -> (Vec<i32>, HashMap<String, usize>) {
-    // Filter by allowed_sources if specified
+    // Filter by allowed_sources if specified (weights also imply a source list)
+    let effective_allowed: Option<Vec<String>> = source_weights
+        .map(|ws| ws.iter().map(|w| w.source.clone()).collect())
+        .or_else(|| allowed_sources.map(|a| a.to_vec()));
+
     let filtered: Vec<(i32, String)> = candidates
         .into_iter()
         .filter(|(_, source)| {
-            match (allowed_sources, source) {
+            match (&effective_allowed, source) {
                 (Some(allowed), Some(s)) => allowed.iter().any(|a| a == s),
                 (Some(_), None) => false,
                 (None, _) => true,
@@ -1125,23 +1133,63 @@ fn source_balanced_sample(
         ids.shuffle(rng);
     }
 
-    // Sort ascending by available count — handle small sources first
-    let mut source_list: Vec<(String, Vec<i32>)> = by_source.into_iter().collect();
-    source_list.sort_by_key(|(_, ids)| ids.len());
-
     let mut selected: Vec<i32> = Vec::with_capacity(count);
     let mut distribution: HashMap<String, usize> = HashMap::new();
-    let mut remaining = count;
-    let total_sources = source_list.len();
 
-    for (i, (source, ids)) in source_list.iter().enumerate() {
-        if remaining == 0 { break; }
-        let sources_left = total_sources - i;
-        let quota = (remaining + sources_left - 1) / sources_left; // ceil
-        let take = quota.min(ids.len()).min(remaining);
-        selected.extend_from_slice(&ids[..take]);
-        distribution.insert(source.clone(), take);
-        remaining -= take;
+    if let Some(weights) = source_weights.filter(|ws| !ws.is_empty()) {
+        // Weighted sampling — normalize weights for sources that exist
+        let total_weight: f32 = weights.iter()
+            .filter(|w| by_source.contains_key(&w.source))
+            .map(|w| w.weight.max(0.0))
+            .sum::<f32>()
+            .max(0.001);
+
+        // Sort by quota ascending — fill small quotas first to avoid remainder issues
+        let mut weight_list: Vec<(&SourceWeight, usize)> = weights.iter()
+            .filter(|w| by_source.contains_key(&w.source) && w.weight > 0.0)
+            .map(|w| {
+                let quota = ((w.weight / total_weight) * count as f32).round() as usize;
+                (w, quota)
+            })
+            .collect();
+        weight_list.sort_by_key(|(_, q)| *q);
+
+        let mut remaining = count;
+        for (w, quota) in &weight_list {
+            if remaining == 0 { break; }
+            let ids = &by_source[&w.source];
+            let take = (*quota).min(ids.len()).min(remaining);
+            selected.extend_from_slice(&ids[..take]);
+            distribution.insert(w.source.clone(), take);
+            remaining -= take;
+        }
+
+        // Fill leftover from source with most available soal
+        if remaining > 0 {
+            if let Some((src, ids)) = by_source.iter().max_by_key(|(_, v)| v.len()) {
+                let already = *distribution.get(src).unwrap_or(&0);
+                let can_take = ids.len().saturating_sub(already).min(remaining);
+                selected.extend_from_slice(&ids[already..already + can_take]);
+                *distribution.entry(src.clone()).or_insert(0) += can_take;
+            }
+        }
+    } else {
+        // Equal-balance: sort ascending by available count, fill each source evenly
+        let mut source_list: Vec<(String, Vec<i32>)> = by_source.into_iter().collect();
+        source_list.sort_by_key(|(_, ids)| ids.len());
+
+        let mut remaining = count;
+        let total_sources = source_list.len();
+
+        for (i, (source, ids)) in source_list.iter().enumerate() {
+            if remaining == 0 { break; }
+            let sources_left = total_sources - i;
+            let quota = (remaining + sources_left - 1) / sources_left; // ceil
+            let take = quota.min(ids.len()).min(remaining);
+            selected.extend_from_slice(&ids[..take]);
+            distribution.insert(source.clone(), take);
+            remaining -= take;
+        }
     }
 
     selected.shuffle(rng);
@@ -1394,7 +1442,7 @@ async fn generate_simulasi_batch(
             }
 
             let (picked, dist) = if do_balance {
-                source_balanced_sample(candidates, section.count as usize, req.allowed_sources.as_deref(), &mut rng)
+                source_balanced_sample(candidates, section.count as usize, req.allowed_sources.as_deref(), req.source_weights.as_deref(), &mut rng)
             } else {
                 let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
                 ids.shuffle(&mut rng);
