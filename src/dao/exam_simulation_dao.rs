@@ -20,7 +20,7 @@ impl ExamSimulationDao {
         let mut sql = String::from(r#"
             SELECT
                 s.id, s.nama_simulasi, s.deskripsi, s.paket_soal_id, ps.nama_paket_soal AS paket_soal_nama,
-                s.generation_mode, s.generation_config,
+                s.generation_mode, s.generation_config, s.navigation_mode, s.sections_json,
                 s.duration_minutes, s.total_questions, s.passing_score,
                 s.is_premium, s.max_attempts, s.is_active,
                 s.created_at, s.updated_at,
@@ -56,7 +56,7 @@ impl ExamSimulationDao {
         sqlx::query_as::<_, ExamSimulation>(r#"
             SELECT
                 s.id, s.nama_simulasi, s.deskripsi, s.paket_soal_id, ps.nama_paket_soal AS paket_soal_nama,
-                s.generation_mode, s.generation_config,
+                s.generation_mode, s.generation_config, s.navigation_mode, s.sections_json,
                 s.duration_minutes, s.total_questions, s.passing_score,
                 s.is_premium, s.max_attempts, s.is_active,
                 s.created_at, s.updated_at,
@@ -82,7 +82,7 @@ impl ExamSimulationDao {
     pub async fn get_by_id(&self, id: i32) -> Result<ExamSimulation, sqlx::Error> {
         sqlx::query_as::<_, ExamSimulation>(r#"
             SELECT s.id, s.nama_simulasi, s.deskripsi, s.paket_soal_id, ps.nama_paket_soal AS paket_soal_nama,
-                   s.generation_mode, s.generation_config,
+                   s.generation_mode, s.generation_config, s.navigation_mode, s.sections_json,
                    s.duration_minutes, s.total_questions, s.passing_score,
                    s.is_premium, s.max_attempts, s.is_active,
                    s.created_at, s.updated_at

@@ -1392,7 +1392,7 @@ async fn generate_simulasi_batch(
             }
 
             let (picked, dist) = if do_balance {
-                source_balanced_sample(candidates, section.count as usize, None, &mut rng)
+                source_balanced_sample(candidates, section.count as usize, req.allowed_sources.as_deref(), &mut rng)
             } else {
                 let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
                 ids.shuffle(&mut rng);
@@ -1467,12 +1467,15 @@ async fn generate_simulasi_batch(
         }
 
         let simulasi_id: Option<i32> = if do_create_simulasi {
+            let sections_json_str = serde_json::to_string(&template.sections).unwrap_or_else(|_| "[]".to_string());
             match sqlx::query(
-                "INSERT INTO exam_simulations (nama_simulasi, deskripsi, paket_soal_id, generation_mode, duration_minutes, total_questions, passing_score, is_premium, max_attempts, is_active) VALUES (?, ?, ?, 'simulasi_template', ?, ?, ?, ?, 0, 1)"
+                "INSERT INTO exam_simulations (nama_simulasi, deskripsi, paket_soal_id, generation_mode, navigation_mode, sections_json, duration_minutes, total_questions, passing_score, is_premium, max_attempts, is_active) VALUES (?, ?, ?, 'simulasi_template', ?, ?, ?, ?, ?, ?, 0, 1)"
             )
             .bind(&nama)
             .bind(&template.description)
             .bind(paket_id)
+            .bind(&template.navigation_mode)
+            .bind(&sections_json_str)
             .bind(template.duration_minutes)
             .bind(total_per_paket as i32)
             .bind(template.passing_score)
@@ -1540,7 +1543,7 @@ async fn source_distribution_summary(
             ps.kode_paket,
             total.total_soal,
             COALESCE(dom.source, 'unknown') AS dominant_source,
-            ROUND(dom.cnt * 100.0 / total.total_soal, 1) AS dominant_persen
+            CAST(ROUND(dom.cnt * 100.0 / total.total_soal, 1) AS DOUBLE) AS dominant_persen
         FROM paket_soal ps
         JOIN (
             SELECT paket_soal_id, COUNT(*) AS total_soal
@@ -1619,7 +1622,7 @@ async fn package_source_distribution(
         SELECT
             s.source,
             COUNT(*) AS cnt,
-            COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS pct
+            CAST(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER () AS DOUBLE) AS pct
         FROM paket_soal_items psi
         JOIN soal s ON s.id = psi.soal_id
         WHERE psi.paket_soal_id = ?

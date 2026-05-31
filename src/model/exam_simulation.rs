@@ -13,6 +13,8 @@ pub struct ExamSimulation {
     pub paket_soal_nama: Option<String>,
     pub generation_mode: String,
     pub generation_config: Option<JsonValue>,
+    pub navigation_mode: String,
+    pub sections_json: Option<JsonValue>,
     pub duration_minutes: i32,
     pub total_questions: i32,
     pub passing_score: i32,
@@ -41,6 +43,12 @@ impl<'c> FromRow<'c, MySqlRow> for ExamSimulation {
             paket_soal_nama: row.try_get("paket_soal_nama").ok(),
             generation_mode: row.get("generation_mode"),
             generation_config: row.try_get("generation_config").ok(),
+            navigation_mode: row.try_get("navigation_mode").unwrap_or_else(|_| "free".to_string()),
+            sections_json: row
+                .try_get::<Option<String>, _>("sections_json")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
             duration_minutes: row.get("duration_minutes"),
             total_questions: row.get("total_questions"),
             passing_score: row.get("passing_score"),

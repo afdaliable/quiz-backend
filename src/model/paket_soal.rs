@@ -350,6 +350,8 @@ pub struct GenerateSimulasiRequest {
     /// Display name prefix: "{nama_prefix} #1", "#2", ...
     pub nama_prefix: String,
     pub source_balance: Option<bool>,
+    /// Restrict sampling to these sources only (empty = all sources)
+    pub allowed_sources: Option<Vec<String>>,
     pub is_premium: Option<bool>,
     /// Auto-create exam_simulations records (default: true)
     pub create_exam_simulasi: Option<bool>,

@@ -90,13 +90,53 @@ async fn start_simulasi(
         }));
     }
 
-    // Generate question IDs.
-    let question_ids = match generate_questions_for_simulasi(&*pool, &sim).await {
-        Ok(ids) => ids,
-        Err(msg) => {
-            eprintln!("Generation failed: {}", msg);
-            return HttpResponse::BadRequest().json(json!({"error": msg}));
+    // Generate question IDs — simulasi_template fetches in insertion order to preserve section order.
+    let question_ids: Vec<i32> = if sim.generation_mode == "simulasi_template" {
+        let paket_id = match sim.paket_soal_id {
+            Some(id) => id,
+            None => return HttpResponse::BadRequest().json(json!({"error": "paket_soal_id required for simulasi_template"})),
+        };
+        match sqlx::query_scalar::<_, i32>(
+            "SELECT soal_id FROM paket_soal_items WHERE paket_soal_id = ? ORDER BY id"
+        )
+        .bind(paket_id)
+        .fetch_all(&*pool).await {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!("Error fetching ordered questions: {:?}", e);
+                return HttpResponse::InternalServerError().json(json!({"error": "Failed to fetch questions"}));
+            }
         }
+    } else {
+        match generate_questions_for_simulasi(&*pool, &sim).await {
+            Ok(ids) => ids,
+            Err(msg) => {
+                eprintln!("Generation failed: {}", msg);
+                return HttpResponse::BadRequest().json(json!({"error": msg}));
+            }
+        }
+    };
+
+    // Build subtest_index boundaries from sections_json
+    let sections: Vec<JsonValue> = sim.sections_json
+        .as_ref()
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut subtest_boundaries: Vec<(usize, usize, usize)> = Vec::new(); // (start, end_exclusive, section_idx)
+    let mut boundary_pos = 0usize;
+    for (i, sec) in sections.iter().enumerate() {
+        let count = sec.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        subtest_boundaries.push((boundary_pos, boundary_pos + count, i));
+        boundary_pos += count;
+    }
+
+    let get_subtest_index = |qpos: usize| -> usize {
+        for &(start, end, idx) in &subtest_boundaries {
+            if qpos >= start && qpos < end { return idx; }
+        }
+        0
     };
 
     // Fetch question payload (mirror RandomSessionSoal shape, withholding correct_answer).
@@ -139,8 +179,15 @@ async fn start_simulasi(
                 .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
         }));
     }
-    let questions: Vec<JsonValue> = question_ids.iter()
-        .filter_map(|id| soal_map.get(id).cloned())
+    let questions: Vec<JsonValue> = question_ids.iter().enumerate()
+        .filter_map(|(pos, id)| {
+            soal_map.get(id).cloned().map(|mut q| {
+                if let Some(obj) = q.as_object_mut() {
+                    obj.insert("subtest_index".to_string(), json!(get_subtest_index(pos)));
+                }
+                q
+            })
+        })
         .collect();
 
     // Create the quiz_session row for this attempt.
@@ -189,6 +236,8 @@ async fn start_simulasi(
         "duration_minutes": sim.duration_minutes,
         "total_questions":  sim.total_questions,
         "passing_score":    sim.passing_score,
+        "navigation_mode":  sim.navigation_mode,
+        "sections":         sections,
         "questions":        questions,
     }))
 }
