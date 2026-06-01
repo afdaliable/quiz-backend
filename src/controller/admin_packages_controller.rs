@@ -383,6 +383,12 @@ async fn update_package(
     match result {
         Ok(result) => {
             if result.rows_affected() > 0 {
+                // Keep the linked simulasi name in sync (rename reflects in Simulasi Ujian list).
+                let _ = sqlx::query("UPDATE exam_simulations SET nama_simulasi = ? WHERE paket_soal_id = ?")
+                    .bind(&package_req.nama_paket_soal)
+                    .bind(package_id)
+                    .execute(&*data.context.soal.pool)
+                    .await;
                 // Invalidate list caches karena data paket soal berubah
                 if let Some(redis_pool) = &data.redis_pool {
                     let mut con = redis_pool.quiz_cache().as_ref().clone();
@@ -450,7 +456,21 @@ async fn delete_package(
         }
     };
 
-    // Delete package items first
+    // Delete linked exam_simulations first (a generated simulasi paket has one),
+    // so deleting the paket doesn't orphan it / break the simulasi list.
+    if let Err(e) = sqlx::query("DELETE FROM exam_simulations WHERE paket_soal_id = ?")
+        .bind(package_id)
+        .execute(&mut *tx)
+        .await
+    {
+        let _ = tx.rollback().await;
+        println!("Error deleting linked exam_simulations: {:?}", e);
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Failed to delete linked simulasi".to_string(),
+        });
+    }
+
+    // Delete package items
     if let Err(e) = sqlx::query("DELETE FROM dbquizapp.paket_soal_items WHERE paket_soal_id = ?")
         .bind(package_id)
         .execute(&mut *tx)
@@ -1301,6 +1321,29 @@ fn source_balanced_sample(
     (selected, distribution)
 }
 
+// ── Helper: get-or-create a kategori_soal by name, returns its id ──
+async fn get_or_create_kategori(
+    pool: &sqlx::MySqlPool,
+    nama: &str,
+) -> Result<i32, sqlx::Error> {
+    if let Some(id) = sqlx::query_scalar::<_, i32>(
+        "SELECT id FROM kategori_soal WHERE nama_kategori = ? LIMIT 1"
+    )
+    .bind(nama)
+    .fetch_optional(pool)
+    .await?
+    {
+        return Ok(id);
+    }
+    let res = sqlx::query(
+        "INSERT INTO kategori_soal (nama_kategori, created_at, updated_at) VALUES (?, NOW(), NOW())"
+    )
+    .bind(nama)
+    .execute(pool)
+    .await?;
+    Ok(res.last_insert_id() as i32)
+}
+
 // ── Helper: generate kode_paket inside a transaction (race-condition safe) ──
 
 async fn generate_kode_paket(
@@ -1534,6 +1577,16 @@ async fn generate_simulasi_batch(
     let total_per_paket: u32 = template.sections.iter().map(|s| s.count).sum();
     let year = chrono::Utc::now().year() as u16;
 
+    // Resolve (or create) the "SIMULASI UJIAN" category so generated pakets
+    // appear on the user home (which inner-joins paket_soal → kategori_soal).
+    let simulasi_kategori_id: i32 = match get_or_create_kategori(pool, "SIMULASI UJIAN").await {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("get_or_create_kategori error: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to resolve simulasi category".to_string() });
+        }
+    };
+
     let mut rng = rand::thread_rng();
     let mut used_ids: HashSet<i32> = HashSet::new();
     let mut packages: Vec<GeneratedSimulasiItem> = Vec::with_capacity(req.jumlah_paket as usize);
@@ -1614,9 +1667,10 @@ async fn generate_simulasi_batch(
         });
 
         let paket_id: i32 = match sqlx::query(
-            "INSERT INTO paket_soal (nama_paket_soal, is_premium, is_generated, generation_rules, kode_paket, created_at, updated_at) VALUES (?, ?, 1, ?, ?, NOW(), NOW())"
+            "INSERT INTO paket_soal (nama_paket_soal, kategori_id, is_premium, is_generated, generation_rules, kode_paket, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?, NOW(), NOW())"
         )
         .bind(&nama)
+        .bind(simulasi_kategori_id)
         .bind(is_premium)
         .bind(generation_rules.to_string())
         .bind(&kode)
