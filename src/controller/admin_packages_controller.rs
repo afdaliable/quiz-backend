@@ -880,6 +880,15 @@ async fn generate_package(
         "hard":   req.difficulty_mix.hard.unwrap_or(0),
     });
 
+    // Assign a "LATIHAN TOPIK" category so generated topic pakets appear on home.
+    let latihan_kategori_id: i32 = match get_or_create_kategori(pool, "LATIHAN TOPIK").await {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("get_or_create_kategori (topik) error: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to resolve category".to_string() });
+        }
+    };
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -914,11 +923,12 @@ async fn generate_package(
     let insert_result = sqlx::query(
         r#"
         INSERT INTO paket_soal
-            (nama_paket_soal, is_premium, is_generated, generation_rules, difficulty_mix, kode_paket, created_at, updated_at)
-        VALUES (?, 0, 1, ?, ?, ?, NOW(), NOW())
+            (nama_paket_soal, kategori_id, is_premium, is_generated, generation_rules, difficulty_mix, kode_paket, created_at, updated_at)
+        VALUES (?, ?, 0, 1, ?, ?, ?, NOW(), NOW())
         "#
     )
     .bind(&req.nama_paket_soal)
+    .bind(latihan_kategori_id)
     .bind(generation_rules.to_string())
     .bind(difficulty_mix_json.to_string())
     .bind(&kode_paket)
