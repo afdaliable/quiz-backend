@@ -315,8 +315,12 @@ impl<'c> Table<'c, QuizSession> {
 
         let session = self.get_quiz_session_by_id(session_id, user_id).await?;
 
-        // Branch: random session gunakan question_ids, standard gunakan kategori+paket
-        let (correct_answers, incorrect_answers, score) = if session.session_type == "random" {
+        // Branch: random AND simulasi sessions score by question_ids (the exact,
+        // ordered subset the user answered). Only legacy paket sessions look up
+        // by kategori+paket name.
+        let use_question_ids = session.session_type == "random"
+            || session.session_type == "simulasi";
+        let (correct_answers, incorrect_answers, score) = if use_question_ids {
             let question_ids: Vec<i32> = session.question_ids
                 .as_ref()
                 .and_then(|json| serde_json::from_str(json).ok())
