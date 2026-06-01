@@ -137,7 +137,8 @@ impl DifficultyMix {
 /// Request for generating a random package
 #[derive(Debug, Deserialize, Serialize, ToSchema)]
 pub struct GeneratePackageRequest {
-    /// Package name
+    /// Package name (accepts `name` or `nama_paket_soal`)
+    #[serde(alias = "name")]
     pub nama_paket_soal: String,
     /// Filter by exam track slug (e.g. "skd", "snbt")
     pub track_slug: Option<String>,
@@ -145,6 +146,12 @@ pub struct GeneratePackageRequest {
     pub category_slug: Option<String>,
     /// Filter by subcategory slug (optional)
     pub subcategory_slug: Option<String>,
+    /// Filter by taxonomy UUIDs (FE sends these directly)
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    /// Filter by topic UUID — uses soal.topic_id (direct FK) + question_topics (m2m)
+    pub topic_id: Option<String>,
     /// Distribution of questions per difficulty level
     pub difficulty_mix: DifficultyMix,
     /// Duration in minutes (default: 90)
@@ -153,6 +160,8 @@ pub struct GeneratePackageRequest {
     pub source_balance: Option<bool>,
     /// Restrict to specific sources only (empty = all sources)
     pub allowed_sources: Option<Vec<String>>,
+    /// Custom per-source weights; overrides proportional balance when provided
+    pub source_weights: Option<Vec<SourceWeight>>,
     /// Prefix for auto-generated package code, e.g. "SKD" → "SKD-2026-001"
     pub kode_prefix: Option<String>,
 }
@@ -182,12 +191,17 @@ pub struct PreviewDistributionRequest {
     pub track_slug: Option<String>,
     pub category_slug: Option<String>,
     pub subcategory_slug: Option<String>,
+    /// Taxonomy UUIDs (FE sends these directly)
+    pub track_id: Option<String>,
+    pub category_id: Option<String>,
+    pub subcategory_id: Option<String>,
+    pub topic_id: Option<String>,
     pub difficulty_mix: DifficultyMix,
     /// If difficulty_mix totals 0, pick this many soal ignoring difficulty filter
     pub total_questions: Option<u32>,
     pub source_balance: Option<bool>,
     pub allowed_sources: Option<Vec<String>>,
-    /// Custom per-source weights; overrides equal-balance when provided
+    /// Custom per-source weights; overrides proportional balance when provided
     pub source_weights: Option<Vec<SourceWeight>>,
     pub kode_prefix: Option<String>,
 }

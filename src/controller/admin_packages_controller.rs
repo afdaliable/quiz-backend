@@ -38,6 +38,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(list_simulasi_templates)
             .service(create_simulasi_template)
             .service(update_simulasi_template)
+            .service(delete_simulasi_template)
             .service(generate_simulasi_batch)
             .service(preview_distribution)
             .service(generate_package)
@@ -724,6 +725,12 @@ async fn generate_package(
 
     let pool = &*data.context.soal.pool;
     let do_balance = req.source_balance.unwrap_or(false);
+    let tax = TaxonomyFilter {
+        track_id: req.track_id.as_deref(),
+        category_id: req.category_id.as_deref(),
+        subcategory_id: req.subcategory_id.as_deref(),
+        topic_id: req.topic_id.as_deref(),
+    };
 
     let mut rng = rand::thread_rng();
     let mut selected_ids: Vec<i32> = Vec::with_capacity(total_needed as usize);
@@ -735,16 +742,21 @@ async fn generate_package(
         ("hard",   req.difficulty_mix.hard.unwrap_or(0)),
     ];
 
+    // Track shortfall per requested difficulty so we can backfill difficulty-agnostically
+    // (the soal pool is overwhelmingly 'medium', so easy/hard requests would otherwise fail).
+    let mut shortfall: usize = 0;
+
     for (diff_label, count) in difficulties {
         if *count == 0 { continue; }
 
-        let candidates = match fetch_candidates_with_source(
+        let candidates = match fetch_candidates_full(
             pool,
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
+            &tax,
             Some(diff_label),
-            &[],
+            &selected_ids,
         ).await {
             Ok(c) => c,
             Err(e) => {
@@ -755,45 +767,26 @@ async fn generate_package(
             }
         };
 
+        let take_now = (*count as usize).min(candidates.len());
+        if take_now < *count as usize {
+            shortfall += *count as usize - take_now;
+        }
+        if take_now == 0 { continue; }
+
         let (picked, dist) = if do_balance {
-            if candidates.len() < *count as usize {
-                return HttpResponse::BadRequest().json(ErrorResponse {
-                    error: format!(
-                        "Not enough {} questions available. Requested {}, found {}.",
-                        diff_label, count, candidates.len()
-                    ),
-                });
-            }
             source_balanced_sample(
                 candidates,
-                *count as usize,
+                take_now,
                 req.allowed_sources.as_deref(),
-                None,
+                req.source_weights.as_deref(),
                 &mut rng,
             )
         } else {
             let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
-            if ids.len() < *count as usize {
-                return HttpResponse::BadRequest().json(ErrorResponse {
-                    error: format!(
-                        "Not enough {} questions available. Requested {}, found {}.",
-                        diff_label, count, ids.len()
-                    ),
-                });
-            }
             ids.shuffle(&mut rng);
-            ids.truncate(*count as usize);
+            ids.truncate(take_now);
             (ids, HashMap::new())
         };
-
-        if do_balance && picked.len() < *count as usize {
-            return HttpResponse::BadRequest().json(ErrorResponse {
-                error: format!(
-                    "Not enough {} questions after source filtering. Requested {}, got {}.",
-                    diff_label, count, picked.len()
-                ),
-            });
-        }
 
         for (source, n) in dist {
             *total_source_dist.entry(source).or_insert(0) += n;
@@ -801,11 +794,60 @@ async fn generate_package(
         selected_ids.extend(picked);
     }
 
+    // Backfill shortfall ignoring difficulty (soft difficulty preference).
+    if shortfall > 0 {
+        let candidates = match fetch_candidates_full(
+            pool,
+            req.track_slug.as_deref(),
+            req.category_slug.as_deref(),
+            req.subcategory_slug.as_deref(),
+            &tax,
+            None, // any difficulty
+            &selected_ids,
+        ).await {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Error fetching backfill candidates: {:?}", e);
+                return HttpResponse::InternalServerError().json(ErrorResponse {
+                    error: "Failed to query backfill questions".to_string(),
+                });
+            }
+        };
+        let take_now = shortfall.min(candidates.len());
+        if take_now > 0 {
+            let (picked, dist) = if do_balance {
+                source_balanced_sample(
+                    candidates, take_now,
+                    req.allowed_sources.as_deref(), req.source_weights.as_deref(), &mut rng,
+                )
+            } else {
+                let mut ids: Vec<i32> = candidates.into_iter().map(|(id, _)| id).collect();
+                ids.shuffle(&mut rng);
+                ids.truncate(take_now);
+                (ids, HashMap::new())
+            };
+            for (source, n) in dist { *total_source_dist.entry(source).or_insert(0) += n; }
+            selected_ids.extend(picked);
+        }
+    }
+
+    if selected_ids.is_empty() {
+        return HttpResponse::BadRequest().json(ErrorResponse {
+            error: "No questions matched the selected filters (track/category/subcategory/topic). Try widening the filters.".to_string(),
+        });
+    }
+
     let mut generation_rules = serde_json::json!({
         "track_slug": req.track_slug,
         "category_slug": req.category_slug,
         "subcategory_slug": req.subcategory_slug,
+        "track_id": req.track_id,
+        "category_id": req.category_id,
+        "subcategory_id": req.subcategory_id,
+        "topic_id": req.topic_id,
         "source_balance": do_balance,
+        "allowed_sources": req.allowed_sources,
+        "source_weights": req.source_weights,
     });
     if do_balance && !total_source_dist.is_empty() {
         generation_rules["source_distribution"] =
@@ -923,6 +965,12 @@ async fn preview_distribution(
 
     let pool = &*data.context.soal.pool;
     let mut rng = rand::thread_rng();
+    let tax = TaxonomyFilter {
+        track_id: req.track_id.as_deref(),
+        category_id: req.category_id.as_deref(),
+        subcategory_id: req.subcategory_id.as_deref(),
+        topic_id: req.topic_id.as_deref(),
+    };
 
     let mut source_available: HashMap<String, usize> = HashMap::new();
     let mut source_pick: HashMap<String, usize> = HashMap::new();
@@ -935,11 +983,12 @@ async fn preview_distribution(
     if diff_total == 0 {
         // No difficulty filter — pick total_questions proportionally from all soal
         let total_needed = req.total_questions.unwrap_or(100) as usize;
-        let candidates = match fetch_candidates_with_source(
+        let candidates = match fetch_candidates_full(
             pool,
             req.track_slug.as_deref(),
             req.category_slug.as_deref(),
             req.subcategory_slug.as_deref(),
+            &tax,
             None, // no difficulty filter
             &[],
         ).await {
@@ -977,11 +1026,12 @@ async fn preview_distribution(
         for (diff_label, count) in difficulties {
             if *count == 0 { continue; }
 
-            let candidates = match fetch_candidates_with_source(
+            let candidates = match fetch_candidates_full(
                 pool,
                 req.track_slug.as_deref(),
                 req.category_slug.as_deref(),
                 req.subcategory_slug.as_deref(),
+                &tax,
                 Some(diff_label),
                 &[],
             ).await {
@@ -1047,11 +1097,36 @@ async fn preview_distribution(
 // - difficulty: optional — pass None to skip difficulty filter (used by simulasi sections)
 // - exclude_ids: soal to skip (anti-duplicate across batch packages)
 
+/// Optional taxonomy filters by UUID (FK columns on `soal`). All None = no filter.
+#[derive(Default, Clone)]
+struct TaxonomyFilter<'a> {
+    track_id: Option<&'a str>,
+    category_id: Option<&'a str>,
+    subcategory_id: Option<&'a str>,
+    topic_id: Option<&'a str>,
+}
+
 async fn fetch_candidates_with_source(
     pool: &sqlx::MySqlPool,
     track_slug: Option<&str>,
     category_slug: Option<&str>,
     subcategory_slug: Option<&str>,
+    difficulty: Option<&str>,
+    exclude_ids: &[i32],
+) -> Result<Vec<(i32, Option<String>)>, sqlx::Error> {
+    fetch_candidates_full(
+        pool, track_slug, category_slug, subcategory_slug,
+        &TaxonomyFilter::default(), difficulty, exclude_ids,
+    ).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn fetch_candidates_full(
+    pool: &sqlx::MySqlPool,
+    track_slug: Option<&str>,
+    category_slug: Option<&str>,
+    subcategory_slug: Option<&str>,
+    tax: &TaxonomyFilter<'_>,
     difficulty: Option<&str>,
     exclude_ids: &[i32],
 ) -> Result<Vec<(i32, Option<String>)>, sqlx::Error> {
@@ -1062,6 +1137,7 @@ async fn fetch_candidates_with_source(
         conditions.push("s.difficulty_est = ?".to_string());
         binds.push(d.to_string());
     }
+    // Slug-based filters (legacy callers)
     if let Some(ts) = track_slug {
         conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)".to_string());
         binds.push(ts.to_string());
@@ -1073,6 +1149,27 @@ async fn fetch_candidates_with_source(
     if let Some(ss) = subcategory_slug {
         conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)".to_string());
         binds.push(ss.to_string());
+    }
+    // UUID-based filters (FK columns, direct match)
+    if let Some(tid) = tax.track_id {
+        conditions.push("s.track_id = ?".to_string());
+        binds.push(tid.to_string());
+    }
+    if let Some(cid) = tax.category_id {
+        conditions.push("s.category_id = ?".to_string());
+        binds.push(cid.to_string());
+    }
+    if let Some(scid) = tax.subcategory_id {
+        conditions.push("s.subcategory_id = ?".to_string());
+        binds.push(scid.to_string());
+    }
+    // Topic: direct FK OR m2m membership (mirrors taxonomy_dao count logic)
+    if let Some(topid) = tax.topic_id {
+        conditions.push(
+            "(s.topic_id = ? OR EXISTS (SELECT 1 FROM question_topics qt WHERE qt.question_id = s.id AND qt.topic_id = ?))".to_string()
+        );
+        binds.push(topid.to_string());
+        binds.push(topid.to_string());
     }
     if !exclude_ids.is_empty() {
         let placeholders = exclude_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
@@ -1133,62 +1230,70 @@ fn source_balanced_sample(
         ids.shuffle(rng);
     }
 
-    let mut selected: Vec<i32> = Vec::with_capacity(count);
-    let mut distribution: HashMap<String, usize> = HashMap::new();
+    let total_available: usize = by_source.values().map(|v| v.len()).sum();
 
-    if let Some(weights) = source_weights.filter(|ws| !ws.is_empty()) {
-        // Weighted sampling — normalize weights for sources that exist
+    // Compute a target "ideal" pick count per source (f32) from either custom
+    // weights or — by default — the source's share of the available pool.
+    // Then convert to integer quotas with the largest-remainder method so the
+    // quotas sum to exactly `count` and match the targets within ±1 each.
+    let ideal: Vec<(String, f32)> = if let Some(weights) =
+        source_weights.filter(|ws| !ws.is_empty())
+    {
         let total_weight: f32 = weights.iter()
             .filter(|w| by_source.contains_key(&w.source))
             .map(|w| w.weight.max(0.0))
             .sum::<f32>()
-            .max(0.001);
-
-        // Sort by quota ascending — fill small quotas first to avoid remainder issues
-        let mut weight_list: Vec<(&SourceWeight, usize)> = weights.iter()
+            .max(0.0001);
+        weights.iter()
             .filter(|w| by_source.contains_key(&w.source) && w.weight > 0.0)
-            .map(|w| {
-                let quota = ((w.weight / total_weight) * count as f32).round() as usize;
-                (w, quota)
-            })
-            .collect();
-        weight_list.sort_by_key(|(_, q)| *q);
+            .map(|w| (w.source.clone(), (w.weight.max(0.0) / total_weight) * count as f32))
+            .collect()
+    } else {
+        // Proportional to pool availability (the default "Source Balance").
+        by_source.iter()
+            .map(|(src, ids)| (src.clone(), (ids.len() as f32 / total_available as f32) * count as f32))
+            .collect()
+    };
 
-        let mut remaining = count;
-        for (w, quota) in &weight_list {
-            if remaining == 0 { break; }
-            let ids = &by_source[&w.source];
-            let take = (*quota).min(ids.len()).min(remaining);
-            selected.extend_from_slice(&ids[..take]);
-            distribution.insert(w.source.clone(), take);
-            remaining -= take;
+    // Largest-remainder apportionment, capped by each source's availability.
+    let mut quotas: HashMap<String, usize> = HashMap::new();
+    let mut remainders: Vec<(String, f32)> = Vec::with_capacity(ideal.len());
+    let mut assigned = 0usize;
+    for (src, target) in &ideal {
+        let avail = by_source.get(src).map(|v| v.len()).unwrap_or(0);
+        let floor = (target.floor() as usize).min(avail);
+        quotas.insert(src.clone(), floor);
+        assigned += floor;
+        // Only sources with spare capacity compete for the remainder seats.
+        if floor < avail {
+            remainders.push((src.clone(), target - target.floor()));
         }
-
-        // Fill leftover from source with most available soal
-        if remaining > 0 {
-            if let Some((src, ids)) = by_source.iter().max_by_key(|(_, v)| v.len()) {
-                let already = *distribution.get(src).unwrap_or(&0);
-                let can_take = ids.len().saturating_sub(already).min(remaining);
-                selected.extend_from_slice(&ids[already..already + can_take]);
-                *distribution.entry(src.clone()).or_insert(0) += can_take;
+    }
+    // Distribute leftover seats by largest fractional remainder, respecting capacity.
+    let mut leftover = count.saturating_sub(assigned).min(total_available.saturating_sub(assigned));
+    remainders.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    while leftover > 0 {
+        let mut progressed = false;
+        for (src, _) in &remainders {
+            if leftover == 0 { break; }
+            let avail = by_source.get(src).map(|v| v.len()).unwrap_or(0);
+            let cur = quotas.get(src).copied().unwrap_or(0);
+            if cur < avail {
+                *quotas.entry(src.clone()).or_insert(0) += 1;
+                leftover -= 1;
+                progressed = true;
             }
         }
-    } else {
-        // Equal-balance: sort ascending by available count, fill each source evenly
-        let mut source_list: Vec<(String, Vec<i32>)> = by_source.into_iter().collect();
-        source_list.sort_by_key(|(_, ids)| ids.len());
+        if !progressed { break; } // all sources at capacity
+    }
 
-        let mut remaining = count;
-        let total_sources = source_list.len();
-
-        for (i, (source, ids)) in source_list.iter().enumerate() {
-            if remaining == 0 { break; }
-            let sources_left = total_sources - i;
-            let quota = (remaining + sources_left - 1) / sources_left; // ceil
-            let take = quota.min(ids.len()).min(remaining);
+    let mut selected: Vec<i32> = Vec::with_capacity(count);
+    let mut distribution: HashMap<String, usize> = HashMap::new();
+    for (src, ids) in &by_source {
+        let take = quotas.get(src).copied().unwrap_or(0).min(ids.len());
+        if take > 0 {
             selected.extend_from_slice(&ids[..take]);
-            distribution.insert(source.clone(), take);
-            remaining -= take;
+            distribution.insert(src.clone(), take);
         }
     }
 
@@ -1361,6 +1466,29 @@ async fn update_simulasi_template(
     }
 }
 
+#[delete("/simulasi-templates/{id}")]
+async fn delete_simulasi_template(
+    path: web::Path<i32>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    log_request("DELETE /admin/packages/simulasi-templates/{id}", &data.connections);
+    let template_id = path.into_inner();
+    let result = sqlx::query("DELETE FROM simulasi_templates WHERE id = ?")
+        .bind(template_id)
+        .execute(&*data.context.soal.pool)
+        .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => HttpResponse::Ok().json(serde_json::json!({"success": true})),
+        Ok(_) => HttpResponse::NotFound().json(ErrorResponse { error: "Template not found".to_string() }),
+        Err(e) => {
+            eprintln!("delete_simulasi_template error: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse { error: "Failed to delete template".to_string() })
+        }
+    }
+}
+
 // ── Generate Simulasi Batch ──
 
 #[post("/generate-simulasi")]
@@ -1382,7 +1510,7 @@ async fn generate_simulasi_batch(
 
     // Load template
     let template = match sqlx::query_as::<_, SimulasiTemplate>(
-        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active FROM simulasi_templates WHERE exam_type = ? AND is_active = true"
+        "SELECT id, exam_type, kode_prefix, name, description, sections, duration_minutes, passing_score, is_active, navigation_mode FROM simulasi_templates WHERE exam_type = ? AND is_active = true"
     )
     .bind(req.exam_type.trim())
     .fetch_optional(pool)
