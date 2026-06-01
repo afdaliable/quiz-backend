@@ -745,11 +745,15 @@ async fn generate_package(
 
     let pool = &*data.context.soal.pool;
     let do_balance = req.source_balance.unwrap_or(false);
+    let empty_vec: Vec<String> = Vec::new();
     let tax = TaxonomyFilter {
         track_id: req.track_id.as_deref(),
         category_id: req.category_id.as_deref(),
         subcategory_id: req.subcategory_id.as_deref(),
         topic_id: req.topic_id.as_deref(),
+        topic_ids: req.topic_ids.as_deref().unwrap_or(&empty_vec),
+        tag_ids: req.tag_ids.as_deref().unwrap_or(&empty_vec),
+        tag_labels: req.tag_labels.as_deref().unwrap_or(&empty_vec),
     };
 
     let mut rng = rand::thread_rng();
@@ -865,6 +869,9 @@ async fn generate_package(
         "category_id": req.category_id,
         "subcategory_id": req.subcategory_id,
         "topic_id": req.topic_id,
+        "topic_ids": req.topic_ids,
+        "tag_ids": req.tag_ids,
+        "tag_labels": req.tag_labels,
         "source_balance": do_balance,
         "allowed_sources": req.allowed_sources,
         "source_weights": req.source_weights,
@@ -995,11 +1002,15 @@ async fn preview_distribution(
 
     let pool = &*data.context.soal.pool;
     let mut rng = rand::thread_rng();
+    let empty_vec: Vec<String> = Vec::new();
     let tax = TaxonomyFilter {
         track_id: req.track_id.as_deref(),
         category_id: req.category_id.as_deref(),
         subcategory_id: req.subcategory_id.as_deref(),
         topic_id: req.topic_id.as_deref(),
+        topic_ids: req.topic_ids.as_deref().unwrap_or(&empty_vec),
+        tag_ids: req.tag_ids.as_deref().unwrap_or(&empty_vec),
+        tag_labels: req.tag_labels.as_deref().unwrap_or(&empty_vec),
     };
 
     let mut source_available: HashMap<String, usize> = HashMap::new();
@@ -1127,13 +1138,20 @@ async fn preview_distribution(
 // - difficulty: optional — pass None to skip difficulty filter (used by simulasi sections)
 // - exclude_ids: soal to skip (anti-duplicate across batch packages)
 
-/// Optional taxonomy filters by UUID (FK columns on `soal`). All None = no filter.
+/// Optional taxonomy filters by UUID (FK columns on `soal`). All None/empty = no filter.
 #[derive(Default, Clone)]
 struct TaxonomyFilter<'a> {
     track_id: Option<&'a str>,
     category_id: Option<&'a str>,
     subcategory_id: Option<&'a str>,
+    /// Single topic (legacy). Combined with `topic_ids` via OR.
     topic_id: Option<&'a str>,
+    /// Multiple topic UUIDs — soal matching ANY are included.
+    topic_ids: &'a [String],
+    /// Tag UUIDs — match against question_tags m2m OR the freetext soal.tag column.
+    tag_ids: &'a [String],
+    /// Tag labels (for matching the freetext soal.tag column).
+    tag_labels: &'a [String],
 }
 
 async fn fetch_candidates_with_source(
@@ -1193,14 +1211,43 @@ async fn fetch_candidates_full(
         conditions.push("s.subcategory_id = ?".to_string());
         binds.push(scid.to_string());
     }
-    // Topic: direct FK OR m2m membership (mirrors taxonomy_dao count logic)
-    if let Some(topid) = tax.topic_id {
-        conditions.push(
-            "(s.topic_id = ? OR EXISTS (SELECT 1 FROM question_topics qt WHERE qt.question_id = s.id AND qt.topic_id = ?))".to_string()
-        );
-        binds.push(topid.to_string());
-        binds.push(topid.to_string());
+    // Topics: union of single `topic_id` + multi `topic_ids`. A soal matches if its
+    // direct FK is any selected topic OR it's linked via question_topics m2m.
+    let mut all_topics: Vec<String> = Vec::new();
+    if let Some(topid) = tax.topic_id { all_topics.push(topid.to_string()); }
+    for t in tax.topic_ids { all_topics.push(t.clone()); }
+    all_topics.sort();
+    all_topics.dedup();
+    if !all_topics.is_empty() {
+        let ph = all_topics.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        conditions.push(format!(
+            "(s.topic_id IN ({ph}) OR EXISTS (SELECT 1 FROM question_topics qt WHERE qt.question_id = s.id AND qt.topic_id IN ({ph})))"
+        ));
+        for t in &all_topics { binds.push(t.clone()); }
+        for t in &all_topics { binds.push(t.clone()); }
     }
+
+    // Tags: match via question_tags m2m (by id) OR the freetext soal.tag column
+    // (by label, since the m2m table is largely empty in current data).
+    if !tax.tag_ids.is_empty() || !tax.tag_labels.is_empty() {
+        let mut tag_conds: Vec<String> = Vec::new();
+        if !tax.tag_ids.is_empty() {
+            let ph = tax.tag_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+            tag_conds.push(format!(
+                "EXISTS (SELECT 1 FROM question_tags qtg WHERE qtg.question_id = s.id AND qtg.tag_id IN ({ph}))"
+            ));
+            for t in tax.tag_ids { binds.push(t.clone()); }
+        }
+        // freetext soal.tag LIKE each label (comma-separated values)
+        for label in tax.tag_labels {
+            tag_conds.push("s.tag LIKE ?".to_string());
+            binds.push(format!("%{}%", label));
+        }
+        if !tag_conds.is_empty() {
+            conditions.push(format!("({})", tag_conds.join(" OR ")));
+        }
+    }
+
     if !exclude_ids.is_empty() {
         let placeholders = exclude_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         conditions.push(format!("s.id NOT IN ({})", placeholders));

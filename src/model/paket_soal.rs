@@ -152,6 +152,12 @@ pub struct GeneratePackageRequest {
     pub subcategory_id: Option<String>,
     /// Filter by topic UUID — uses soal.topic_id (direct FK) + question_topics (m2m)
     pub topic_id: Option<String>,
+    /// Filter by multiple topic UUIDs (soal matching ANY are included)
+    pub topic_ids: Option<Vec<String>>,
+    /// Filter by tag UUIDs (m2m) — optional
+    pub tag_ids: Option<Vec<String>>,
+    /// Filter by tag labels (matched against freetext soal.tag) — optional
+    pub tag_labels: Option<Vec<String>>,
     /// Distribution of questions per difficulty level
     pub difficulty_mix: DifficultyMix,
     /// Duration in minutes (default: 90)
@@ -196,6 +202,9 @@ pub struct PreviewDistributionRequest {
     pub category_id: Option<String>,
     pub subcategory_id: Option<String>,
     pub topic_id: Option<String>,
+    pub topic_ids: Option<Vec<String>>,
+    pub tag_ids: Option<Vec<String>>,
+    pub tag_labels: Option<Vec<String>>,
     pub difficulty_mix: DifficultyMix,
     /// If difficulty_mix totals 0, pick this many soal ignoring difficulty filter
     pub total_questions: Option<u32>,
