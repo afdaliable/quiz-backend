@@ -13,6 +13,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(list_simulasi)
        .service(get_simulasi_detail)
        .service(start_simulasi)
+       .service(get_session_review)
        .service(get_my_attempts);
 }
 
@@ -239,6 +240,123 @@ async fn start_simulasi(
         "navigation_mode":  sim.navigation_mode,
         "sections":         sections,
         "questions":        questions,
+    }))
+}
+
+/// Review a COMPLETED simulasi session — returns each question with the
+/// correct answer key + the user's chosen answer. Answer keys are only
+/// exposed here (never during the live quiz), and only to the session owner.
+#[get("/simulasi-ujian/session/{session_id}/review")]
+async fn get_session_review(
+    path: web::Path<String>,
+    state: web::Data<AppState<'_>>,
+    user: AuthenticatedUser,
+) -> impl Responder {
+    let session_id = path.into_inner();
+    let pool = state.context.soal.pool.clone();
+
+    // Load the session, scoped to the requesting user.
+    let sess = match sqlx::query(
+        "SELECT user_id, simulasi_id, question_ids, answers, is_completed, nama_paket_soal \
+         FROM quiz_sessions WHERE id = ?"
+    )
+    .bind(&session_id)
+    .fetch_optional(&*pool)
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return HttpResponse::NotFound().json(json!({"error": "Session not found"})),
+        Err(e) => {
+            eprintln!("Error loading session for review: {:?}", e);
+            return HttpResponse::InternalServerError().json(json!({"error": "Failed to load session"}));
+        }
+    };
+
+    let owner: String = sess.try_get("user_id").unwrap_or_default();
+    if owner != user.user_id {
+        return HttpResponse::Forbidden().json(json!({"error": "Not your session"}));
+    }
+    let is_completed: bool = sess.try_get("is_completed").unwrap_or(false);
+    if !is_completed {
+        return HttpResponse::BadRequest().json(json!({"error": "Session not completed yet"}));
+    }
+
+    let question_ids: Vec<i32> = sess
+        .try_get::<Option<String>, _>("question_ids").ok().flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    if question_ids.is_empty() {
+        return HttpResponse::Ok().json(json!({"questions": [], "answers": [], "sections": []}));
+    }
+    let user_answers: Vec<Option<i32>> = sess
+        .try_get::<Option<String>, _>("answers").ok().flatten()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    // Sections from the linked exam_simulations record.
+    let simulasi_id: Option<i32> = sess.try_get("simulasi_id").ok();
+    let sections: Vec<JsonValue> = if let Some(sid) = simulasi_id {
+        let dao = ExamSimulationDao::new(pool.clone());
+        match dao.get_by_id(sid).await {
+            Ok(sim) => sim.sections_json
+                .as_ref()
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
+    };
+
+    // Fetch full question content INCLUDING correct_answer for review.
+    let placeholders = question_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+    let rows_sql = format!(
+        "SELECT id, soal, question_type, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, option_scores \
+         FROM soal WHERE id IN ({})",
+        placeholders
+    );
+    let mut q = sqlx::query(&rows_sql);
+    for id in &question_ids { q = q.bind(*id); }
+    let rows = match q.fetch_all(&*pool).await {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error fetching review questions: {:?}", e);
+            return HttpResponse::InternalServerError().json(json!({"error": "Failed to fetch questions"}));
+        }
+    };
+
+    let mut soal_map: std::collections::HashMap<i32, JsonValue> = std::collections::HashMap::new();
+    for row in rows {
+        let id: i32 = row.get("id");
+        soal_map.insert(id, json!({
+            "id":             id,
+            "soal":           row.try_get::<String, _>("soal").ok(),
+            "question_type":  row.try_get::<String, _>("question_type").ok().unwrap_or_else(|| "multiple_choice".to_string()),
+            "opt1":           row.try_get::<Option<String>, _>("opt1").ok().flatten(),
+            "opt2":           row.try_get::<Option<String>, _>("opt2").ok().flatten(),
+            "opt3":           row.try_get::<Option<String>, _>("opt3").ok().flatten(),
+            "opt4":           row.try_get::<Option<String>, _>("opt4").ok().flatten(),
+            "opt5":           row.try_get::<Option<String>, _>("opt5").ok().flatten(),
+            "correct_answer": row.try_get::<Option<String>, _>("correct_answer").ok().flatten(),
+            "solution":       row.try_get::<Option<String>, _>("solution").ok().flatten(),
+            "option_scores":  row
+                .try_get::<Option<String>, _>("option_scores")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()),
+        }));
+    }
+    let questions: Vec<JsonValue> = question_ids.iter()
+        .filter_map(|id| soal_map.get(id).cloned())
+        .collect();
+
+    HttpResponse::Ok().json(json!({
+        "session_id": session_id,
+        "nama":       sess.try_get::<Option<String>, _>("nama_paket_soal").ok().flatten(),
+        "sections":   sections,
+        "questions":  questions,
+        "answers":    user_answers,
     }))
 }
 
