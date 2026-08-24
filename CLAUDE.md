@@ -1,3 +1,14 @@
+## Onboarding
+
+Read [`docs/ONBOARDING.md`](./docs/ONBOARDING.md) first — architecture,
+domain model, auth strategy, validation rules, core flows, and known
+gotchas for this backend, with pointers into the other docs in this repo
+for endpoint-level detail.
+
+**Whenever a change touches architecture, the domain model, validation
+rules, or a core flow (auth, a write path, a read path), update
+`docs/ONBOARDING.md` in that same change** — not as a separate follow-up.
+
 # Project Stack
 - `frontend/` — Angular
 - `backend/` — Rust
