@@ -1026,8 +1026,10 @@ async fn download_csv_template(
         .body(template_content)
 }
 
-/// Upload an image file for use in question fields.
-/// Accepts: image/jpeg, image/png, image/gif, image/webp (max 5MB).
+/// Upload an image or audio file for use in question fields (e.g. Listening
+/// Comprehension audio, shared across many soal via a passage).
+/// Accepts: image/jpeg, image/png, image/gif, image/webp (max 5MB);
+/// audio/mpeg (max 100MB).
 /// Returns: { "url": "/static/soal-images/{uuid}.{ext}" }
 #[post("/upload-image")]
 async fn upload_image(
@@ -1038,6 +1040,9 @@ async fn upload_image(
 
     let upload_dir = data.config.get_upload_dir();
     let image_dir = format!("{}/soal-images", upload_dir);
+
+    const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+    const AUDIO_MAX_BYTES: usize = 100 * 1024 * 1024;
 
     let mut file_bytes: Vec<u8> = Vec::new();
     let mut file_ext = String::new();
@@ -1055,25 +1060,25 @@ async fn upload_image(
         // NOTE: MIME type comes from the multipart Content-Type header and can be
         // spoofed by the client. This is acceptable because the endpoint is
         // admin-only (protected by AdminMiddleware).
-        let ext = match mime.as_ref().map(|m| m.essence_str()) {
-            Some("image/jpeg") => "jpg",
-            Some("image/png") => "png",
-            Some("image/gif") => "gif",
-            Some("image/webp") => "webp",
+        let (ext, max_bytes) = match mime.as_ref().map(|m| m.essence_str()) {
+            Some("image/jpeg") => ("jpg", IMAGE_MAX_BYTES),
+            Some("image/png") => ("png", IMAGE_MAX_BYTES),
+            Some("image/gif") => ("gif", IMAGE_MAX_BYTES),
+            Some("image/webp") => ("webp", IMAGE_MAX_BYTES),
+            Some("audio/mpeg") | Some("audio/mp3") => ("mp3", AUDIO_MAX_BYTES),
             _ => {
                 return HttpResponse::BadRequest().json(ErrorResponse {
-                    error: "Tipe file tidak didukung. Gunakan JPEG, PNG, GIF, atau WebP.".to_string(),
+                    error: "Tipe file tidak didukung. Gunakan JPEG, PNG, GIF, WebP, atau MP3.".to_string(),
                 });
             }
         };
         file_ext = ext.to_string();
 
-        // Read bytes with 5MB limit
         while let Some(chunk) = field.try_next().await.unwrap_or(None) {
             file_bytes.extend_from_slice(&chunk);
-            if file_bytes.len() > 5 * 1024 * 1024 {
+            if file_bytes.len() > max_bytes {
                 return HttpResponse::BadRequest().json(ErrorResponse {
-                    error: "File terlalu besar. Maksimal 5MB.".to_string(),
+                    error: format!("File terlalu besar. Maksimal {}MB.", max_bytes / (1024 * 1024)),
                 });
             }
         }
