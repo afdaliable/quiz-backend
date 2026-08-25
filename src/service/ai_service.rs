@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 use crate::config::Config;
+use crate::model::taxonomy::{TaxonomyTree, Topic};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Error type
@@ -505,6 +506,208 @@ impl AiService {
             ))
         })
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Taxonomy classification (2-stage: subcategory, then topic within it) +
+// cross-link topic suggestion. Callers (materi_generate_controller-style job
+// wiring) supply the already-fetched TaxonomyTree -- this service stays
+// DB-agnostic, matching how it doesn't own the DB pool for enrich/generate
+// either.
+// ─────────────────────────────────────────────────────────────────────────────
+
+impl AiService {
+    async fn complete_with_retry(&self, system: &str, user: &str, max_tokens: u32) -> Result<String, AiError> {
+        match self.primary.complete(system, user, max_tokens).await {
+            Ok((text, _, _)) => Ok(text),
+            Err(primary_err) => match &self.fallback {
+                Some(fallback) => match fallback.complete(system, user, max_tokens).await {
+                    Ok((text, _, _)) => Ok(text),
+                    Err(fallback_err) => Err(AiError::BothProvidersFailed(format!(
+                        "primary: {}, fallback: {}",
+                        primary_err, fallback_err
+                    ))),
+                },
+                None => Err(primary_err),
+            },
+        }
+    }
+
+    /// Stage 1: pick the best-fit subcategory slug for a soal from the full
+    /// track > category > subcategory list (topics excluded here -- stage 2
+    /// picks the topic from the already-fetched tree, no second DB call).
+    pub async fn classify_subcategory(
+        &self,
+        soal_text: &str,
+        options_text: &str,
+        tree: &TaxonomyTree,
+    ) -> Result<String, AiError> {
+        let mut lines = String::new();
+        for t in &tree.tracks {
+            for c in &t.categories {
+                for s in &c.subcategories {
+                    lines.push_str(&format!(
+                        "{} | {} > {} > {}\n",
+                        s.subcategory.slug, t.track.name, c.category.name, s.subcategory.name
+                    ));
+                }
+            }
+        }
+
+        let system = "Kamu asisten klasifikasi soal ujian. Tugasmu: pilih SATU subkategori yang \
+            paling cocok buat soal yang diberikan, dari daftar yang disediakan. Balas HANYA satu \
+            objek JSON, karakter pertama '{' terakhir '}', tanpa teks lain.\n\n\
+            Contoh: {\"subcategory_slug\": \"twk-tes-wawasan-kebangsaan\"}"
+            .to_string();
+        let user = format!(
+            "Daftar subkategori (format: slug | track > kategori > subkategori):\n{lines}\n\n\
+             Soal:\n{soal_text}\n\n\
+             Pilihan jawaban:\n{options_text}\n\n\
+             Balas: {{\"subcategory_slug\": \"<slug persis dari daftar di atas>\"}}",
+        );
+
+        let text = self.complete_with_retry(&system, &user, self.max_tokens).await?;
+        #[derive(Deserialize)]
+        struct Resp {
+            subcategory_slug: String,
+        }
+        let extracted = extract_json_object(&text);
+        let parsed: Resp = serde_json::from_str(extracted).map_err(|e| {
+            AiError::ParseError(format!(
+                "Invalid JSON from AI (stage 1 - subcategory): {} (raw: {})",
+                e,
+                &text[..text.len().min(500)]
+            ))
+        })?;
+        Ok(parsed.subcategory_slug)
+    }
+
+    /// Stage 2: pick the primary topic within an already-chosen subcategory.
+    /// Returns None if the subcategory has no topics or the model can't
+    /// find a good fit.
+    pub async fn classify_topic(
+        &self,
+        soal_text: &str,
+        options_text: &str,
+        topics: &[Topic],
+    ) -> Result<Option<String>, AiError> {
+        if topics.is_empty() {
+            return Ok(None);
+        }
+        let mut lines = String::new();
+        for t in topics {
+            lines.push_str(&format!("{} | {}\n", t.slug, t.name));
+        }
+
+        let system = "Kamu asisten klasifikasi soal ujian. Tugasmu: pilih SATU topik yang paling \
+            cocok buat soal yang diberikan, dari daftar yang disediakan. Kalau gak ada yang cocok \
+            sama sekali, balas null. Balas HANYA satu objek JSON, karakter pertama '{' terakhir \
+            '}', tanpa teks lain.\n\n\
+            Contoh: {\"topic_slug\": \"analogi-kata\"}"
+            .to_string();
+        let user = format!(
+            "Daftar topik (format: slug | nama):\n{lines}\n\n\
+             Soal:\n{soal_text}\n\n\
+             Pilihan jawaban:\n{options_text}\n\n\
+             Balas: {{\"topic_slug\": \"<slug persis dari daftar di atas>\" atau null}}",
+        );
+
+        let text = self.complete_with_retry(&system, &user, self.max_tokens).await?;
+        #[derive(Deserialize)]
+        struct Resp {
+            topic_slug: Option<String>,
+        }
+        let extracted = extract_json_object(&text);
+        let parsed: Resp = serde_json::from_str(extracted).map_err(|e| {
+            AiError::ParseError(format!(
+                "Invalid JSON from AI (stage 2 - topic): {} (raw: {})",
+                e,
+                &text[..text.len().min(500)]
+            ))
+        })?;
+        Ok(parsed.topic_slug)
+    }
+
+    /// Stage 3: pick 0-5 additional cross-link topics from a pre-filtered
+    /// "clean" candidate list (see filter_clean_topics -- excludes
+    /// subcategories whose topics are tryout-package names, not real
+    /// semantic categories).
+    pub async fn classify_additional_topics(
+        &self,
+        soal_text: &str,
+        options_text: &str,
+        candidates: &[(String, String)], // (slug, "track > kategori > subkategori > topik")
+    ) -> Result<Vec<String>, AiError> {
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut lines = String::new();
+        for (slug, label) in candidates {
+            lines.push_str(&format!("{} | {}\n", slug, label));
+        }
+
+        let system = "Kamu asisten klasifikasi soal ujian. Soal ini SUDAH punya kategori utama -- \
+            tugasmu sekarang cari topik TAMBAHAN dari jalur/track LAIN yang temanya juga relevan \
+            (misal soal penalaran umum UTBK yang temanya juga cocok dipakai di TIU CPNS). Pilih \
+            0 sampai 5 topik dari daftar, HANYA yang beneran relevan -- kosongkan array kalau \
+            gak ada yang cocok, jangan maksain. Balas HANYA satu objek JSON, karakter pertama \
+            '{' terakhir '}', tanpa teks lain.\n\n\
+            Contoh: {\"additional_topic_slugs\": [\"analogi-kata\", \"sinonim-antonim\"]}"
+            .to_string();
+        let user = format!(
+            "Daftar kandidat topik lintas-jalur (format: slug | track > kategori > subkategori > topik):\n{lines}\n\n\
+             Soal:\n{soal_text}\n\n\
+             Pilihan jawaban:\n{options_text}\n\n\
+             Balas: {{\"additional_topic_slugs\": [<0-5 slug persis dari daftar di atas>]}}",
+        );
+
+        let text = self.complete_with_retry(&system, &user, self.max_tokens).await?;
+        #[derive(Deserialize)]
+        struct Resp {
+            additional_topic_slugs: Vec<String>,
+        }
+        let extracted = extract_json_object(&text);
+        let parsed: Resp = serde_json::from_str(extracted).map_err(|e| {
+            AiError::ParseError(format!(
+                "Invalid JSON from AI (stage 3 - cross-link): {} (raw: {})",
+                e,
+                &text[..text.len().min(500)]
+            ))
+        })?;
+        Ok(parsed.additional_topic_slugs)
+    }
+}
+
+/// Marks a whole subcategory's topics as excluded from cross-link
+/// candidates if ANY of its topic names look like a tryout-package name
+/// (numbered, or containing "tryout"/"paket"/"simulasi") rather than a real
+/// semantic category -- same heuristic the soal-enrichment pipeline used
+/// (src/cross_link.py in that project), ported here so this feature doesn't
+/// need a Python sidecar.
+pub fn filter_clean_topics(tree: &TaxonomyTree, exclude_subcategory_id: &str) -> Vec<(String, String)> {
+    let messy_re = regex::Regex::new(r"(?i)^\d|tryout|paket|simulasi").unwrap();
+    let mut out = Vec::new();
+    for t in &tree.tracks {
+        for c in &t.categories {
+            for s in &c.subcategories {
+                if s.subcategory.id == exclude_subcategory_id {
+                    continue;
+                }
+                let messy = s.topics.iter().any(|topic| messy_re.is_match(&topic.name));
+                if messy {
+                    continue;
+                }
+                for topic in &s.topics {
+                    let label = format!(
+                        "{} > {} > {} > {}",
+                        t.track.name, c.category.name, s.subcategory.name, topic.name
+                    );
+                    out.push((topic.slug.clone(), label));
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Ekstrak blok `{ ... }` terluar dari teks AI (strip markdown fences + leading text).
