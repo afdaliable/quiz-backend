@@ -73,6 +73,10 @@ pub struct EnrichedContent {
     pub tag: Option<String>,
     pub modul: Option<String>,
     pub pelajaran: Option<String>,
+    /// Only set when "correct_answer" was requested AND the soal didn't
+    /// already have one -- see build_prompt for why: the model is only
+    /// asked to determine this when it isn't given it as known context.
+    pub correct_answer: Option<String>,
     pub provider_used: String,
     pub model_used: String,
     pub prompt_tokens: u32,
@@ -216,6 +220,10 @@ struct AiResponseJson {
     tag: Option<String>,
     modul: Option<String>,
     pelajaran: Option<String>,
+    // Only requested conditionally (see build_prompt) -- default lets the
+    // key be absent entirely when we didn't ask for it, not just null.
+    #[serde(default)]
+    correct_answer: Option<String>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,6 +299,7 @@ impl AiService {
                     tag: parsed.tag,
                     modul: parsed.modul,
                     pelajaran: parsed.pelajaran,
+                    correct_answer: parsed.correct_answer,
                     provider_used: self.primary.provider_name().to_string(),
                     model_used: self.primary.model_name().to_string(),
                     prompt_tokens,
@@ -314,6 +323,7 @@ impl AiService {
                                     tag: parsed.tag,
                                     modul: parsed.modul,
                                     pelajaran: parsed.pelajaran,
+                                    correct_answer: parsed.correct_answer,
                                     provider_used: fallback.provider_name().to_string(),
                                     model_used: fallback.model_name().to_string(),
                                     prompt_tokens,
@@ -340,46 +350,73 @@ impl AiService {
     /// token budget on prose and getting cut off by finish_reason=max_tokens
     /// before a single '{' appears.
     fn build_prompt(soal: &SoalContext) -> (String, String) {
-        let system = "Kamu adalah asisten pendidikan yang menganalisis soal ujian berbagai \
+        // Determine the answer ourselves only when it's actually missing or
+        // explicitly requested -- never second-guess an answer key that's
+        // already there just because "correct_answer" wasn't in the request.
+        let has_answer = soal
+            .correct_answer
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        let wants_answer = soal.fields_to_enrich.iter().any(|f| f == "correct_answer");
+        let determine_answer = wants_answer || !has_answer;
+
+        let example = if determine_answer {
+            "{\"correct_answer\": \"opt2\", \"solution\": \"2 + 2 = 4 karena penjumlahan dua bilangan cacah.\", \"tag\": \"matematika-dasar\", \"modul\": \"Operasi Hitung\", \"pelajaran\": \"Matematika\"}"
+        } else {
+            "{\"solution\": \"2 + 2 = 4 karena penjumlahan dua bilangan cacah.\", \"tag\": \"matematika-dasar\", \"modul\": \"Operasi Hitung\", \"pelajaran\": \"Matematika\"}"
+        };
+        let system = format!(
+            "Kamu adalah asisten pendidikan yang menganalisis soal ujian berbagai \
             topik ujian dengan bahasa Indonesia. Tugasmu HANYA mengembalikan satu objek JSON \
             berisi penjelasan dan metadata soal -- jangan menjelaskan proses berpikirmu, \
             jangan menyapa, jangan membungkus dengan markdown code fence, jangan menulis apa \
             pun sebelum atau sesudah objek JSON itu. Balasanmu akan di-parse langsung sebagai \
-            JSON, jadi karakter pertama balasanmu harus '{' dan karakter terakhir harus '}'.\n\n\
-            Contoh balasan yang benar persis:\n\
-            {\"solution\": \"2 + 2 = 4 karena penjumlahan dua bilangan cacah.\", \"tag\": \"matematika-dasar\", \"modul\": \"Operasi Hitung\", \"pelajaran\": \"Matematika\"}"
-            .to_string();
+            JSON, jadi karakter pertama balasanmu harus '{{' dan karakter terakhir harus '}}'.\n\n\
+            Contoh balasan yang benar persis:\n{example}"
+        );
 
         let opts = [
-            soal.opt1.as_deref().unwrap_or(""),
-            soal.opt2.as_deref().unwrap_or(""),
-            soal.opt3.as_deref().unwrap_or(""),
-            soal.opt4.as_deref().unwrap_or(""),
-            soal.opt5.as_deref().unwrap_or(""),
+            ("opt1", soal.opt1.as_deref().unwrap_or("")),
+            ("opt2", soal.opt2.as_deref().unwrap_or("")),
+            ("opt3", soal.opt3.as_deref().unwrap_or("")),
+            ("opt4", soal.opt4.as_deref().unwrap_or("")),
+            ("opt5", soal.opt5.as_deref().unwrap_or("")),
         ];
-        let labels = ["A", "B", "C", "D", "E"];
 
         let mut options_text = String::new();
-        for (label, opt) in labels.iter().zip(opts.iter()) {
+        for (key, opt) in opts.iter() {
             if !opt.is_empty() {
-                options_text.push_str(&format!("{}. {}\n", label, opt));
+                options_text.push_str(&format!("{}: {}\n", key, opt));
             }
         }
 
-        let correct = soal.correct_answer.as_deref().unwrap_or("-");
+        let answer_line = if determine_answer {
+            String::new()
+        } else {
+            format!("Jawaban benar: {}\n\n", soal.correct_answer.as_deref().unwrap_or("-"))
+        };
+
+        let mut field_instructions = String::new();
+        if determine_answer {
+            field_instructions.push_str(
+                "- \"correct_answer\": tentukan sendiri jawaban yang paling benar berdasarkan analisismu -- salah satu dari \"opt1\", \"opt2\", \"opt3\", \"opt4\", \"opt5\" (hanya opsi yang ada di atas)\n",
+            );
+        }
+        field_instructions.push_str(
+            "- \"solution\": penjelasan singkat (2-4 kalimat) kenapa jawaban di atas benar\n\
+             - \"tag\": satu topik-utama singkat (kebab-case atau frasa pendek)\n\
+             - \"modul\": nama modul/bab jika bisa dideteksi dari isi soal, string kosong \"\" jika tidak\n\
+             - \"pelajaran\": nama mata pelajaran jika bisa dideteksi, string kosong \"\" jika tidak",
+        );
 
         let user = format!(
             "Soal:\n{soal_text}\n\n\
              Pilihan jawaban:\n{options}\n\
-             Jawaban benar: {correct}\n\n\
-             Isi field berikut untuk soal di atas, balas sebagai objek JSON tunggal:\n\
-             - \"solution\": penjelasan singkat (2-4 kalimat) kenapa jawaban di atas benar\n\
-             - \"tag\": satu topik-utama singkat (kebab-case atau frasa pendek)\n\
-             - \"modul\": nama modul/bab jika bisa dideteksi dari isi soal, string kosong \"\" jika tidak\n\
-             - \"pelajaran\": nama mata pelajaran jika bisa dideteksi, string kosong \"\" jika tidak",
+             {answer_line}Isi field berikut untuk soal di atas, balas sebagai objek JSON tunggal:\n\
+             {field_instructions}",
             soal_text = soal.soal,
             options = options_text,
-            correct = correct,
         );
 
         (system, user)
@@ -736,7 +773,7 @@ mod tests {
         let soal = sample_soal();
         let (_system, user) = AiService::build_prompt(&soal);
         assert!(user.contains("2 + 2"));
-        assert!(user.contains("B. 4"));
+        assert!(user.contains("opt2: 4"));
         assert!(user.contains("Jawaban benar: B"));
     }
 
@@ -744,7 +781,34 @@ mod tests {
     fn test_build_prompt_skips_empty_options() {
         let soal = sample_soal(); // opt5 = None
         let (_system, user) = AiService::build_prompt(&soal);
-        assert!(!user.contains("E. "));
+        assert!(!user.contains("opt5:"));
+    }
+
+    #[test]
+    fn test_build_prompt_asks_for_answer_when_missing() {
+        let mut soal = sample_soal();
+        soal.correct_answer = None;
+        let (system, user) = AiService::build_prompt(&soal);
+        assert!(user.contains("\"correct_answer\""));
+        assert!(!user.contains("Jawaban benar:"));
+        assert!(system.contains("\"correct_answer\": \"opt2\""));
+    }
+
+    #[test]
+    fn test_build_prompt_asks_for_answer_when_explicitly_requested() {
+        let mut soal = sample_soal(); // has correct_answer = Some("B")
+        soal.fields_to_enrich = vec!["correct_answer".to_string()];
+        let (_system, user) = AiService::build_prompt(&soal);
+        assert!(user.contains("\"correct_answer\""));
+        assert!(!user.contains("Jawaban benar:"));
+    }
+
+    #[test]
+    fn test_build_prompt_does_not_ask_for_answer_when_present_and_not_requested() {
+        let soal = sample_soal(); // has correct_answer, fields = [solution, tag]
+        let (_system, user) = AiService::build_prompt(&soal);
+        assert!(!user.contains("\"correct_answer\""));
+        assert!(user.contains("Jawaban benar: B"));
     }
 
     #[test]

@@ -672,8 +672,10 @@ async fn enrich_single_for_job(
         let tag = field_if_requested(fields, "tag", enriched.tag.as_deref());
         let modul = field_if_requested(fields, "modul", enriched.modul.as_deref());
         let pelajaran = field_if_requested(fields, "pelajaran", enriched.pelajaran.as_deref());
+        let correct_answer =
+            field_if_requested(fields, "correct_answer", enriched.correct_answer.as_deref());
 
-        if save_enriched_fields(pool, question_id, solution, tag, modul, pelajaran)
+        if save_enriched_fields(pool, question_id, solution, tag, modul, pelajaran, correct_answer)
             .await
             .is_err()
         {
@@ -682,7 +684,7 @@ async fn enrich_single_for_job(
     }
 
     // Record generated content (accepted = auto_save)
-    let field_map: [(&str, Option<&str>, Option<&str>); 4] = [
+    let field_map: [(&str, Option<&str>, Option<&str>); 5] = [
         (
             "solution",
             soal.solution.as_deref(),
@@ -694,6 +696,11 @@ async fn enrich_single_for_job(
             "pelajaran",
             soal.pelajaran.as_deref(),
             enriched.pelajaran.as_deref(),
+        ),
+        (
+            "correct_answer",
+            soal.correct_answer.as_deref(),
+            enriched.correct_answer.as_deref(),
         ),
     ];
     for (field_name, original, generated) in &field_map {
@@ -855,6 +862,7 @@ async fn save_enriched_fields(
     tag: Option<&str>,
     modul: Option<&str>,
     pelajaran: Option<&str>,
+    correct_answer: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     // Build dynamic SET clause — always include updated_at
     let mut set_parts: Vec<&str> = vec!["updated_at = NOW()"];
@@ -869,6 +877,9 @@ async fn save_enriched_fields(
     }
     if pelajaran.is_some() {
         set_parts.push("pelajaran = ?");
+    }
+    if correct_answer.is_some() {
+        set_parts.push("correct_answer = ?");
     }
 
     let sql = format!(
@@ -888,6 +899,9 @@ async fn save_enriched_fields(
     }
     if let Some(p) = pelajaran {
         q = q.bind(p);
+    }
+    if let Some(c) = correct_answer {
+        q = q.bind(c);
     }
     q = q.bind(question_id);
 
