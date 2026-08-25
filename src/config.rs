@@ -73,7 +73,14 @@ pub struct Config {
     internal_api_key: Option<String>,
     #[serde(default)]
     midtrans: MidtransConfig,
-    #[serde(default)]
+    /// Raw JSON for the "ai" section -- kept untyped here so a shape mismatch
+    /// (e.g. an instance still running an older config.json after an AiConfig
+    /// field rename) can't crash the whole config load. `from_file` converts
+    /// this into the typed `ai` field, degrading to None with a warning
+    /// instead of panicking on a bad/stale "ai" section.
+    #[serde(default, rename = "ai")]
+    ai_raw: Option<serde_json::Value>,
+    #[serde(skip)]
     ai: Option<AiConfig>,
     #[serde(default)]
     upload_dir: Option<String>,
@@ -81,8 +88,21 @@ pub struct Config {
 
 impl Config {
     pub fn from_file(path: &'static str) -> Self {
-        let config = fs::read_to_string(path).unwrap();
-        serde_json::from_str(&config).unwrap()
+        let raw = fs::read_to_string(path).unwrap();
+        let mut config: Config = serde_json::from_str(&raw).unwrap();
+        config.ai = config.ai_raw.take().and_then(|v| {
+            match serde_json::from_value::<AiConfig>(v) {
+                Ok(ai) => Some(ai),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: 'ai' config section present but doesn't match AiConfig ({}) -- AI features disabled on this instance",
+                        e
+                    );
+                    None
+                }
+            }
+        });
+        config
     }
 
     pub fn get_app_url(&self) -> String {
@@ -197,5 +217,63 @@ impl Config {
 
     pub fn get_upload_dir(&self) -> String {
         self.upload_dir.clone().unwrap_or_else(|| "./uploads".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minimal_config_json(ai_section: &str) -> String {
+        format!(
+            r#"{{
+                "app": {{"url": "http://localhost", "port": 8080}},
+                "dao": {{"user": "u", "password": "p", "address": "a", "database": "d"}},
+                "api_key": "k",
+                "jwt_secret": "s",
+                "anon_key": "a",
+                "auth_url": "u",
+                "google_oauth": {{"client_id": "c", "client_secret": "s", "redirect_uri": "r"}},
+                "payment": {{"mayar_api_key": "k", "mayar_api_url": "u", "mayar_webhook_url": "u", "mayar_webhook_secret": "s", "mayar_saas_api_url": "u"}},
+                "redis": {{"host": "h", "port": 6379, "password": "p"}}
+                {ai_section}
+            }}"#
+        )
+    }
+
+    fn write_temp(content: &str) -> &'static str {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::SeqCst);
+        let path = format!("/tmp/config_test_{}_{}.json", std::process::id(), n);
+        std::fs::write(&path, content).unwrap();
+        Box::leak(path.into_boxed_str())
+    }
+
+    #[test]
+    fn missing_ai_section_loads_fine() {
+        let path = write_temp(&minimal_config_json(""));
+        let cfg = Config::from_file(path);
+        assert!(cfg.get_ai_config().is_none());
+    }
+
+    #[test]
+    fn valid_ai_section_loads() {
+        let ai = r#", "ai": {"base_url": "http://x", "api_key": "k", "model": "m", "max_tokens": 100, "temperature": 0.5, "timeout_secs": 10}"#;
+        let path = write_temp(&minimal_config_json(ai));
+        let cfg = Config::from_file(path);
+        let ai_cfg = cfg.get_ai_config().expect("ai config should parse");
+        assert_eq!(ai_cfg.model, "m");
+    }
+
+    /// The regression this guards: an "ai" section in the old shape (as a
+    /// stale replica's config.json might still have after AiConfig's fields
+    /// were renamed) must degrade to None, not panic the whole config load.
+    #[test]
+    fn stale_ai_section_shape_degrades_instead_of_panicking() {
+        let ai = r#", "ai": {"primary_provider": "deepseek", "deepseek_api_key": "x", "deepseek_model": "y", "gemini_api_key": "z", "gemini_model": "w", "fallback_enabled": true, "max_tokens": 100, "temperature": 0.5, "timeout_secs": 10}"#;
+        let path = write_temp(&minimal_config_json(ai));
+        let cfg = Config::from_file(path);
+        assert!(cfg.get_ai_config().is_none());
     }
 }
