@@ -74,7 +74,7 @@ pub struct EnrichedContent {
 /// Returns `(response_text, prompt_tokens, completion_tokens)`.
 #[async_trait]
 pub trait AiProvider: Send + Sync {
-    async fn complete(&self, prompt: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError>;
+    async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError>;
     fn provider_name(&self) -> &str;
     fn model_name(&self) -> &str;
 }
@@ -133,13 +133,13 @@ struct ChatResponse {
 
 #[async_trait]
 impl AiProvider for NineRouterProvider {
-    async fn complete(&self, prompt: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError> {
+    async fn complete(&self, system: &str, user: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError> {
         let body = ChatRequest {
             model: self.model.clone(),
-            messages: vec![ChatMessage {
-                role: "user".to_string(),
-                content: prompt.to_string(),
-            }],
+            messages: vec![
+                ChatMessage { role: "system".to_string(), content: system.to_string() },
+                ChatMessage { role: "user".to_string(), content: user.to_string() },
+            ],
             max_tokens,
             temperature: self.temperature,
             stream: false,
@@ -268,9 +268,9 @@ impl AiService {
     /// Perkaya sebuah soal menggunakan AI. Coba primary provider dulu;
     /// jika gagal, fallback ke provider kedua.
     pub async fn enrich_question(&self, soal: &SoalContext) -> Result<EnrichedContent, AiError> {
-        let prompt = Self::build_prompt(soal);
+        let (system, user) = Self::build_prompt(soal);
 
-        match self.primary.complete(&prompt, self.max_tokens).await {
+        match self.primary.complete(&system, &user, self.max_tokens).await {
             Ok((text, prompt_tokens, completion_tokens)) => {
                 let parsed = Self::parse_ai_response(&text)?;
                 Ok(EnrichedContent {
@@ -293,7 +293,7 @@ impl AiService {
                             primary_err,
                             fallback.provider_name(),
                         );
-                        match fallback.complete(&prompt, self.max_tokens).await {
+                        match fallback.complete(&system, &user, self.max_tokens).await {
                             Ok((text, prompt_tokens, completion_tokens)) => {
                                 let parsed = Self::parse_ai_response(&text)?;
                                 Ok(EnrichedContent {
@@ -319,7 +319,24 @@ impl AiService {
         }
     }
 
-    fn build_prompt(soal: &SoalContext) -> String {
+    /// Returns (system_prompt, user_prompt). Kept as two separate messages
+    /// (not one blob) because a dedicated system role holds instruction-
+    /// following better than stuffing rules into the user turn -- some
+    /// models (observed: gemini-pro-agent via 9router) otherwise "think out
+    /// loud" in the response instead of emitting bare JSON, burning the
+    /// token budget on prose and getting cut off by finish_reason=max_tokens
+    /// before a single '{' appears.
+    fn build_prompt(soal: &SoalContext) -> (String, String) {
+        let system = "Kamu adalah asisten pendidikan yang menganalisis soal ujian berbagai \
+            topik ujian dengan bahasa Indonesia. Tugasmu HANYA mengembalikan satu objek JSON \
+            berisi penjelasan dan metadata soal -- jangan menjelaskan proses berpikirmu, \
+            jangan menyapa, jangan membungkus dengan markdown code fence, jangan menulis apa \
+            pun sebelum atau sesudah objek JSON itu. Balasanmu akan di-parse langsung sebagai \
+            JSON, jadi karakter pertama balasanmu harus '{' dan karakter terakhir harus '}'.\n\n\
+            Contoh balasan yang benar persis:\n\
+            {\"solution\": \"2 + 2 = 4 karena penjumlahan dua bilangan cacah.\", \"tag\": \"matematika-dasar\", \"modul\": \"Operasi Hitung\", \"pelajaran\": \"Matematika\"}"
+            .to_string();
+
         let opts = [
             soal.opt1.as_deref().unwrap_or(""),
             soal.opt2.as_deref().unwrap_or(""),
@@ -338,22 +355,21 @@ impl AiService {
 
         let correct = soal.correct_answer.as_deref().unwrap_or("-");
 
-        format!(
-            "Kamu adalah asisten pendidikan yang menganalisis soal ujian berbagai topik ujian dengan bahasa Indonesia.\n\n\
-             Soal:\n{soal_text}\n\n\
+        let user = format!(
+            "Soal:\n{soal_text}\n\n\
              Pilihan jawaban:\n{options}\n\
              Jawaban benar: {correct}\n\n\
-             Berikan output JSON dengan format TEPAT ini (tanpa penjelasan tambahan):\n\
-             {{\n  \
-               \"solution\": \"penjelasan mengapa jawaban benar, 2-4 kalimat\",\n  \
-               \"tag\": \"topik-utama\",\n  \
-               \"modul\": \"nama modul/bab jika bisa dideteksi, kosong jika tidak\",\n  \
-               \"pelajaran\": \"nama mata pelajaran jika bisa dideteksi, kosong jika tidak\"\n\
-             }}",
+             Isi field berikut untuk soal di atas, balas sebagai objek JSON tunggal:\n\
+             - \"solution\": penjelasan singkat (2-4 kalimat) kenapa jawaban di atas benar\n\
+             - \"tag\": satu topik-utama singkat (kebab-case atau frasa pendek)\n\
+             - \"modul\": nama modul/bab jika bisa dideteksi dari isi soal, string kosong \"\" jika tidak\n\
+             - \"pelajaran\": nama mata pelajaran jika bisa dideteksi, string kosong \"\" jika tidak",
             soal_text = soal.soal,
             options = options_text,
             correct = correct,
-        )
+        );
+
+        (system, user)
     }
 
     /// Parse JSON response dari AI. Handles markdown code fences dan leading/trailing text.
@@ -418,7 +434,8 @@ mod tests {
     impl AiProvider for MockProvider {
         async fn complete(
             &self,
-            _prompt: &str,
+            _system: &str,
+            _user: &str,
             _max_tokens: u32,
         ) -> Result<(String, u32, u32), AiError> {
             match self.response {
@@ -606,16 +623,24 @@ mod tests {
     #[test]
     fn test_build_prompt_contains_question() {
         let soal = sample_soal();
-        let prompt = AiService::build_prompt(&soal);
-        assert!(prompt.contains("2 + 2"));
-        assert!(prompt.contains("B. 4"));
-        assert!(prompt.contains("Jawaban benar: B"));
+        let (_system, user) = AiService::build_prompt(&soal);
+        assert!(user.contains("2 + 2"));
+        assert!(user.contains("B. 4"));
+        assert!(user.contains("Jawaban benar: B"));
     }
 
     #[test]
     fn test_build_prompt_skips_empty_options() {
         let soal = sample_soal(); // opt5 = None
-        let prompt = AiService::build_prompt(&soal);
-        assert!(!prompt.contains("E. "));
+        let (_system, user) = AiService::build_prompt(&soal);
+        assert!(!user.contains("E. "));
+    }
+
+    #[test]
+    fn test_build_prompt_system_demands_json_only() {
+        let soal = sample_soal();
+        let (system, _user) = AiService::build_prompt(&soal);
+        assert!(system.contains("JSON"));
+        assert!(system.contains('{') && system.contains('}'));
     }
 }

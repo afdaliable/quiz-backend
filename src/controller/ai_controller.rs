@@ -1,7 +1,7 @@
 use crate::middleware::admin_middleware::{AdminMiddleware, AuthentikClaims};
 use crate::model::ai_models::estimate_cost;
 use crate::model::soal::AdminSoal;
-use crate::service::ai_service::{AiError, AiService, SoalContext};
+use crate::service::ai_service::{AiService, SoalContext};
 use crate::AppState;
 use actix_web::{web, HttpMessage, HttpRequest, HttpResponse, Responder};
 use redis::AsyncCommands;
@@ -25,31 +25,8 @@ pub struct EnrichRequest {
     pub save: bool,
 }
 
-#[derive(Debug, Serialize)]
-pub struct EnrichResponse {
-    pub question_id: i64,
-    pub original: FieldValues,
-    pub enriched: FieldValues,
-    pub saved: bool,
-    pub provider_used: String,
-    pub model_used: String,
-    pub tokens_used: TokensUsed,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FieldValues {
-    pub solution: Option<String>,
-    pub tag: Option<String>,
-    pub modul: Option<String>,
-    pub pelajaran: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct TokensUsed {
-    pub prompt: u32,
-    pub completion: u32,
-    pub total: u32,
-}
+// Single-question enrich now returns the same BulkJobAcceptedResponse shape
+// as bulk-enrich (see below) -- it's a job with total=1, polled the same way.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request / Response types — bulk enrich
@@ -167,6 +144,11 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 // Handler: POST /ai/questions/{id}/enrich
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Runs as an async job (same machinery as bulk-enrich) instead of blocking
+/// this request on the LLM call. 9router can take 20s+ for a real prompt,
+/// which trips Cloudflare's Free-plan proxy timeout on a synchronous route
+/// -- returning 202 + a poll_url sidesteps that entirely. Poll via the
+/// existing `GET /ai/questions/bulk-enrich/{job_id}`.
 async fn enrich_question(
     path: web::Path<i64>,
     body: web::Json<EnrichRequest>,
@@ -190,8 +172,8 @@ async fn enrich_question(
     }
 
     // ── 3. Require AI service ─────────────────────────────────────────────
-    let ai_service: &AiService = match &data.ai_service {
-        Some(svc) => svc,
+    let ai_service = match &data.ai_service {
+        Some(svc) => Arc::clone(svc),
         None => {
             return HttpResponse::ServiceUnavailable().json(err(
                 "ai_service_unavailable",
@@ -200,9 +182,9 @@ async fn enrich_question(
         }
     };
 
-    // ── 4. Fetch soal ─────────────────────────────────────────────────────
-    let soal = match fetch_soal(pool, question_id).await {
-        Ok(Some(s)) => s,
+    // ── 4. Verify the question exists before spawning a job for it ────────
+    match fetch_soal(pool, question_id).await {
+        Ok(Some(_)) => {}
         Ok(None) => {
             return HttpResponse::NotFound().json(err(
                 "not_found",
@@ -219,144 +201,38 @@ async fn enrich_question(
                 "Failed to fetch question from database.",
             ));
         }
-    };
+    }
 
-    // ── 5. Resolve fields to enrich ───────────────────────────────────────
+    // ── 5. Resolve fields, create job, spawn worker ────────────────────────
     let fields = resolve_fields(&body.fields);
+    let pool_arc = Arc::clone(&data.context.soal.pool);
 
-    // ── 6. Build SoalContext ──────────────────────────────────────────────
-    let ctx = build_soal_context(&soal, fields.clone());
-
-    // ── 7. Call AI ────────────────────────────────────────────────────────
-    let enriched = match ai_service.enrich_question(&ctx).await {
-        Ok(e) => e,
-        Err(e) => {
-            let err_msg = e.to_string();
-            let _ = insert_ai_usage_log(
-                pool,
-                question_id,
-                None,
-                "unknown",
-                "unknown",
-                &fields,
-                0,
-                0,
-                0.0,
-                false,
-                Some(&err_msg),
-                Some(&admin_email),
-            )
-            .await;
-
-            return match e {
-                AiError::BothProvidersFailed(_) => {
-                    HttpResponse::BadGateway().json(err("ai_providers_failed", err_msg))
-                }
-                _ => HttpResponse::BadGateway().json(err("ai_error", err_msg)),
-            };
-        }
-    };
-
-    // ── 8. Estimate cost & log usage ──────────────────────────────────────
-    let cost = estimate_cost(
-        &enriched.provider_used,
-        enriched.prompt_tokens as i32,
-        enriched.completion_tokens as i32,
-    );
-
-    let _ = insert_ai_usage_log(
-        pool,
-        question_id,
-        None,
-        &enriched.provider_used.clone(),
-        &enriched.model_used.clone(),
-        &fields,
-        enriched.prompt_tokens as i32,
-        enriched.completion_tokens as i32,
-        cost,
-        true,
-        None,
-        Some(&admin_email),
+    match spawn_enrich_job(
+        vec![question_id],
+        fields,
+        body.save,
+        60,
+        pool_arc,
+        ai_service,
+        admin_email,
     )
-    .await;
-
-    // ── 9. Persist if save=true ───────────────────────────────────────────
-    let saved = if body.save {
-        let solution = field_if_requested(&fields, "solution", enriched.solution.as_deref());
-        let tag = field_if_requested(&fields, "tag", enriched.tag.as_deref());
-        let modul = field_if_requested(&fields, "modul", enriched.modul.as_deref());
-        let pelajaran = field_if_requested(&fields, "pelajaran", enriched.pelajaran.as_deref());
-
-        let save_ok = save_enriched_fields(pool, question_id, solution, tag, modul, pelajaran)
-            .await
-            .is_ok();
-
-        if save_ok {
-            let field_map: [(&str, Option<&str>, Option<&str>); 4] = [
-                (
-                    "solution",
-                    soal.solution.as_deref(),
-                    enriched.solution.as_deref(),
-                ),
-                ("tag", soal.tag.as_deref(), enriched.tag.as_deref()),
-                ("modul", soal.modul.as_deref(), enriched.modul.as_deref()),
-                (
-                    "pelajaran",
-                    soal.pelajaran.as_deref(),
-                    enriched.pelajaran.as_deref(),
-                ),
-            ];
-            for (field_name, original, generated) in &field_map {
-                if fields.contains(&field_name.to_string()) {
-                    if let Some(gen) = generated {
-                        let _ = insert_ai_generated_content(
-                            pool,
-                            question_id,
-                            None,
-                            field_name,
-                            *original,
-                            gen,
-                            &enriched.provider_used,
-                            &enriched.model_used,
-                            true,
-                            Some(&admin_email),
-                        )
-                        .await;
-                    }
-                }
-            }
+    .await
+    {
+        Ok((job_id, total)) => HttpResponse::Accepted().json(BulkJobAcceptedResponse {
+            poll_url: format!("/ai/questions/bulk-enrich/{}", job_id),
+            job_id,
+            status: "pending".to_string(),
+            total_questions: total as usize,
+            estimated_minutes: 1,
+        }),
+        Err(e) => {
+            eprintln!(
+                "[ai_controller] Failed to create enrich job for {}: {:?}",
+                question_id, e
+            );
+            HttpResponse::InternalServerError().json(err("db_error", "Failed to create enrich job."))
         }
-
-        save_ok
-    } else {
-        false
-    };
-
-    // ── 10. Build response ────────────────────────────────────────────────
-    let total_tokens = enriched.prompt_tokens + enriched.completion_tokens;
-    HttpResponse::Ok().json(EnrichResponse {
-        question_id,
-        original: FieldValues {
-            solution: soal.solution.clone(),
-            tag: soal.tag.clone(),
-            modul: soal.modul.clone(),
-            pelajaran: soal.pelajaran.clone(),
-        },
-        enriched: FieldValues {
-            solution: enriched.solution,
-            tag: enriched.tag,
-            modul: enriched.modul,
-            pelajaran: enriched.pelajaran,
-        },
-        saved,
-        provider_used: enriched.provider_used,
-        model_used: enriched.model_used,
-        tokens_used: TokensUsed {
-            prompt: enriched.prompt_tokens,
-            completion: enriched.completion_tokens,
-            total: total_tokens,
-        },
-    })
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -422,55 +298,29 @@ async fn bulk_enrich(
         ));
     }
 
-    // ── 3. Create job record ──────────────────────────────────────────────
-    let job_id = Uuid::new_v4().to_string();
+    // ── 3-4. Create job record + spawn background worker ───────────────────
     let fields = resolve_fields(&body.fields);
-    let fields_json = serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
-    let total = question_ids.len() as i32;
     let rate_limit = body.rate_limit_per_minute.max(1);
+    let pool_arc = Arc::clone(&data.context.soal.pool);
 
-    if let Err(e) = sqlx::query(
-        r#"
-        INSERT INTO dbquizapp.ai_bulk_jobs
-            (id, status, total, processed, succeeded, failed, auto_save,
-             rate_limit_per_minute, fields, created_by)
-        VALUES (?, 'pending', ?, 0, 0, 0, ?, ?, ?, ?)
-        "#,
+    let (job_id, total) = match spawn_enrich_job(
+        question_ids,
+        fields,
+        body.auto_save,
+        rate_limit,
+        pool_arc,
+        ai_service,
+        admin_email,
     )
-    .bind(&job_id)
-    .bind(total)
-    .bind(body.auto_save)
-    .bind(rate_limit as i32)
-    .bind(&fields_json)
-    .bind(&admin_email)
-    .execute(pool)
     .await
     {
-        eprintln!("[ai_controller] Failed to insert bulk job: {:?}", e);
-        return HttpResponse::InternalServerError()
-            .json(err("db_error", "Failed to create bulk job."));
-    }
-
-    // ── 4. Spawn background worker ────────────────────────────────────────
-    let pool_arc = Arc::clone(&data.context.soal.pool);
-    let job_id_clone = job_id.clone();
-    let fields_clone = fields.clone();
-    let auto_save = body.auto_save;
-    let admin_email_clone = admin_email.clone();
-
-    tokio::spawn(async move {
-        run_bulk_job(
-            job_id_clone,
-            question_ids,
-            fields_clone,
-            auto_save,
-            rate_limit,
-            pool_arc,
-            ai_service,
-            admin_email_clone,
-        )
-        .await;
-    });
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[ai_controller] Failed to insert bulk job: {:?}", e);
+            return HttpResponse::InternalServerError()
+                .json(err("db_error", "Failed to create bulk job."));
+        }
+    };
 
     // ── 5. Return 202 ─────────────────────────────────────────────────────
     let estimated_minutes = ((total as u64) + rate_limit as u64 - 1) / rate_limit as u64;
@@ -481,6 +331,58 @@ async fn bulk_enrich(
         total_questions: total as usize,
         estimated_minutes,
     })
+}
+
+/// Creates an `ai_bulk_jobs` row and spawns the background worker for it.
+/// Shared by the single-question and bulk enrich endpoints -- a single
+/// question is just a job with total=1.
+async fn spawn_enrich_job(
+    question_ids: Vec<i64>,
+    fields: Vec<String>,
+    auto_save: bool,
+    rate_limit_per_minute: u32,
+    pool: Arc<MySqlPool>,
+    ai_service: Arc<AiService>,
+    admin_email: String,
+) -> Result<(String, i32), sqlx::Error> {
+    let job_id = Uuid::new_v4().to_string();
+    let fields_json = serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
+    let total = question_ids.len() as i32;
+    let rate_limit = rate_limit_per_minute.max(1);
+
+    sqlx::query(
+        r#"
+        INSERT INTO dbquizapp.ai_bulk_jobs
+            (id, status, total, processed, succeeded, failed, auto_save,
+             rate_limit_per_minute, fields, created_by)
+        VALUES (?, 'pending', ?, 0, 0, 0, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&job_id)
+    .bind(total)
+    .bind(auto_save)
+    .bind(rate_limit as i32)
+    .bind(&fields_json)
+    .bind(&admin_email)
+    .execute(&*pool)
+    .await?;
+
+    let job_id_clone = job_id.clone();
+    tokio::spawn(async move {
+        run_bulk_job(
+            job_id_clone,
+            question_ids,
+            fields,
+            auto_save,
+            rate_limit,
+            pool,
+            ai_service,
+            admin_email,
+        )
+        .await;
+    });
+
+    Ok((job_id, total))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
