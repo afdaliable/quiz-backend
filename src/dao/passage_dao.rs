@@ -50,17 +50,22 @@ impl<'c> Table<'c, Passage> {
     }
 
     pub async fn update_passage(&self, id: i32, req: &CreatePassageRequest) -> Result<Passage, Error> {
+        // content is required (validated non-empty by the controller) so it's
+        // always hard-set; title/source/language are optional and must be
+        // COALESCE'd or an update that omits them silently wipes the existing
+        // value (this bit us: a content-only PUT nulled title+source).
         let result = sqlx::query(
             r#"
             UPDATE passages
-            SET content = ?, title = ?, source = ?, language = ?, updated_at = NOW()
+            SET content = ?, title = COALESCE(?, title), source = COALESCE(?, source),
+                language = COALESCE(?, language), updated_at = NOW()
             WHERE id = ?
             "#,
         )
         .bind(&req.content)
         .bind(&req.title)
         .bind(&req.source)
-        .bind(req.language.as_deref().unwrap_or("id"))
+        .bind(&req.language)
         .bind(id)
         .execute(&*self.pool)
         .await?;
