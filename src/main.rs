@@ -62,8 +62,8 @@ async fn main() -> std::io::Result<()> {
 
     let ai_service = match AiService::from_config(&config) {
         Some(svc) => {
-            println!("AI service initialized (provider: {})", config.get_ai_config()
-                .map(|c| c.primary_provider.as_str())
+            println!("AI service initialized (model: {})", config.get_ai_config()
+                .map(|c| c.model.as_str())
                 .unwrap_or("unknown"));
             Some(Arc::new(svc))
         }

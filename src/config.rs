@@ -3,12 +3,9 @@ use std::fs;
 
 #[derive(Deserialize, Clone)]
 pub struct AiConfig {
-    pub primary_provider: String,
-    pub deepseek_api_key: String,
-    pub deepseek_model: String,
-    pub gemini_api_key: String,
-    pub gemini_model: String,
-    pub fallback_enabled: bool,
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
     pub max_tokens: u32,
     pub temperature: f32,
     pub timeout_secs: u64,

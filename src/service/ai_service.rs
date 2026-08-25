@@ -1,4 +1,5 @@
-//! AI Service Layer — abstraksi multi-provider (DeepSeek + Gemini Flash).
+//! AI Service Layer — provider tunggal via 9router (self-hosted OpenAI-compatible
+//! gateway, model "default-soal").
 //!
 //! Penggunaan dari controller:
 //! ```ignore
@@ -79,10 +80,11 @@ pub trait AiProvider: Send + Sync {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DeepSeek provider
+// 9router provider (self-hosted OpenAI-compatible gateway)
 // ─────────────────────────────────────────────────────────────────────────────
 
-struct DeepSeekProvider {
+struct NineRouterProvider {
+    base_url: String,
     api_key: String,
     model: String,
     temperature: f32,
@@ -90,65 +92,62 @@ struct DeepSeekProvider {
 }
 
 #[derive(Serialize)]
-struct DeepSeekMessage {
+struct ChatMessage {
     role: String,
     content: String,
 }
 
 #[derive(Serialize)]
-struct DeepSeekRequest {
+struct ChatRequest {
     model: String,
-    messages: Vec<DeepSeekMessage>,
+    messages: Vec<ChatMessage>,
     max_tokens: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
+    temperature: f32,
+    stream: bool,
 }
 
 #[derive(Deserialize)]
-struct DeepSeekChoice {
-    message: DeepSeekMessageContent,
+struct ChatChoice {
+    message: ChatMessageContent,
 }
 
 #[derive(Deserialize)]
-struct DeepSeekMessageContent {
+struct ChatMessageContent {
     content: String,
 }
 
-#[derive(Deserialize)]
-struct DeepSeekUsage {
+#[derive(Deserialize, Default)]
+struct ChatUsage {
+    #[serde(default)]
     prompt_tokens: u32,
+    #[serde(default)]
     completion_tokens: u32,
 }
 
 #[derive(Deserialize)]
-struct DeepSeekResponse {
-    choices: Vec<DeepSeekChoice>,
-    usage: DeepSeekUsage,
+struct ChatResponse {
+    choices: Vec<ChatChoice>,
+    #[serde(default)]
+    usage: Option<ChatUsage>,
 }
 
 #[async_trait]
-impl AiProvider for DeepSeekProvider {
+impl AiProvider for NineRouterProvider {
     async fn complete(&self, prompt: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError> {
-        // deepseek-reasoner does not support the temperature parameter
-        let temperature = if self.model == "deepseek-reasoner" {
-            None
-        } else {
-            Some(self.temperature)
-        };
-
-        let body = DeepSeekRequest {
+        let body = ChatRequest {
             model: self.model.clone(),
-            messages: vec![DeepSeekMessage {
+            messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: prompt.to_string(),
             }],
             max_tokens,
-            temperature,
+            temperature: self.temperature,
+            stream: false,
         };
 
         let resp = self
             .client
-            .post("https://api.deepseek.com/chat/completions")
+            .post(format!("{}/chat/completions", self.base_url))
             .bearer_auth(&self.api_key)
             .json(&body)
             .send()
@@ -170,7 +169,7 @@ impl AiProvider for DeepSeekProvider {
             return Err(AiError::ProviderError(format!("HTTP {}: {}", status, body_text)));
         }
 
-        let parsed: DeepSeekResponse = resp
+        let parsed: ChatResponse = resp
             .json()
             .await
             .map_err(|e| AiError::ParseError(e.to_string()))?;
@@ -181,153 +180,13 @@ impl AiProvider for DeepSeekProvider {
             .next()
             .map(|c| c.message.content)
             .unwrap_or_default();
+        let usage = parsed.usage.unwrap_or_default();
 
-        Ok((content, parsed.usage.prompt_tokens, parsed.usage.completion_tokens))
+        Ok((content, usage.prompt_tokens, usage.completion_tokens))
     }
 
     fn provider_name(&self) -> &str {
-        "deepseek"
-    }
-    fn model_name(&self) -> &str {
-        &self.model
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Gemini Flash provider
-// ─────────────────────────────────────────────────────────────────────────────
-
-struct GeminiProvider {
-    api_key: String,
-    model: String,
-    temperature: f32,
-    client: Client,
-}
-
-#[derive(Serialize)]
-struct GeminiPart {
-    text: String,
-}
-
-#[derive(Serialize)]
-struct GeminiContent {
-    parts: Vec<GeminiPart>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiGenerationConfig {
-    max_output_tokens: u32,
-    temperature: f32,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiRequest {
-    contents: Vec<GeminiContent>,
-    generation_config: GeminiGenerationConfig,
-}
-
-#[derive(Deserialize)]
-struct GeminiResponsePart {
-    text: String,
-}
-
-#[derive(Deserialize)]
-struct GeminiResponseContent {
-    parts: Vec<GeminiResponsePart>,
-}
-
-#[derive(Deserialize)]
-struct GeminiCandidate {
-    content: GeminiResponseContent,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiUsageMetadata {
-    prompt_token_count: Option<u32>,
-    candidates_token_count: Option<u32>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GeminiResponse {
-    candidates: Vec<GeminiCandidate>,
-    usage_metadata: Option<GeminiUsageMetadata>,
-}
-
-#[async_trait]
-impl AiProvider for GeminiProvider {
-    async fn complete(&self, prompt: &str, max_tokens: u32) -> Result<(String, u32, u32), AiError> {
-        let url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-            self.model, self.api_key
-        );
-
-        let body = GeminiRequest {
-            contents: vec![GeminiContent {
-                parts: vec![GeminiPart {
-                    text: prompt.to_string(),
-                }],
-            }],
-            generation_config: GeminiGenerationConfig {
-                max_output_tokens: max_tokens,
-                temperature: self.temperature,
-            },
-        };
-
-        let resp = self
-            .client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                if e.is_timeout() {
-                    AiError::Timeout
-                } else {
-                    AiError::ProviderError(e.to_string())
-                }
-            })?;
-
-        if resp.status().as_u16() == 429 {
-            return Err(AiError::RateLimit);
-        }
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let body_text = resp.text().await.unwrap_or_default();
-            return Err(AiError::ProviderError(format!("HTTP {}: {}", status, body_text)));
-        }
-
-        let parsed: GeminiResponse = resp
-            .json()
-            .await
-            .map_err(|e| AiError::ParseError(e.to_string()))?;
-
-        let content = parsed
-            .candidates
-            .into_iter()
-            .next()
-            .and_then(|c| c.content.parts.into_iter().next())
-            .map(|p| p.text)
-            .unwrap_or_default();
-
-        let (prompt_tokens, completion_tokens) = parsed
-            .usage_metadata
-            .map(|u| {
-                (
-                    u.prompt_token_count.unwrap_or(0),
-                    u.candidates_token_count.unwrap_or(0),
-                )
-            })
-            .unwrap_or((0, 0));
-
-        Ok((content, prompt_tokens, completion_tokens))
-    }
-
-    fn provider_name(&self) -> &str {
-        "gemini"
+        "9router"
     }
     fn model_name(&self) -> &str {
         &self.model
@@ -367,39 +226,23 @@ impl AiService {
             .build()
             .expect("Failed to build HTTP client for AI service");
 
-        let primary: Box<dyn AiProvider> = match ai_cfg.primary_provider.as_str() {
-            "gemini" => Box::new(GeminiProvider {
-                api_key: ai_cfg.gemini_api_key.clone(),
-                model: ai_cfg.gemini_model.clone(),
-                temperature: ai_cfg.temperature,
-                client: client.clone(),
-            }),
-            _ => Box::new(DeepSeekProvider {
-                api_key: ai_cfg.deepseek_api_key.clone(),
-                model: ai_cfg.deepseek_model.clone(),
-                temperature: ai_cfg.temperature,
-                client: client.clone(),
-            }),
-        };
+        let primary: Box<dyn AiProvider> = Box::new(NineRouterProvider {
+            base_url: ai_cfg.base_url.clone(),
+            api_key: ai_cfg.api_key.clone(),
+            model: ai_cfg.model.clone(),
+            temperature: ai_cfg.temperature,
+            client: client.clone(),
+        });
 
-        let fallback: Option<Box<dyn AiProvider>> = if ai_cfg.fallback_enabled {
-            match ai_cfg.primary_provider.as_str() {
-                "gemini" => Some(Box::new(DeepSeekProvider {
-                    api_key: ai_cfg.deepseek_api_key.clone(),
-                    model: ai_cfg.deepseek_model.clone(),
-                    temperature: ai_cfg.temperature,
-                    client,
-                })),
-                _ => Some(Box::new(GeminiProvider {
-                    api_key: ai_cfg.gemini_api_key.clone(),
-                    model: ai_cfg.gemini_model.clone(),
-                    temperature: ai_cfg.temperature,
-                    client,
-                })),
-            }
-        } else {
-            None
-        };
+        // Single provider -- the "fallback" slot is a retry-once against the
+        // same 9router endpoint, since it's the only backend we call now.
+        let fallback: Option<Box<dyn AiProvider>> = Some(Box::new(NineRouterProvider {
+            base_url: ai_cfg.base_url.clone(),
+            api_key: ai_cfg.api_key.clone(),
+            model: ai_cfg.model.clone(),
+            temperature: ai_cfg.temperature,
+            client,
+        }));
 
         Some(AiService {
             primary,
