@@ -153,6 +153,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_admin_analytics_controller)
             .configure(controller::init_admin_alerts_controller)
             .configure(controller::init_admin_passage_controller)
+            .configure(controller::init_materi_generate_controller)
             .configure(controller::init_internal_soal_controller)
             .configure(controller::init_question_comment_controller)
             .configure(controller::init_subscription_controller)

@@ -53,6 +53,19 @@ pub struct SoalContext {
     pub fields_to_enrich: Vec<String>,
 }
 
+/// Satu soal hasil generate AI dari teks materi -- draft, belum disimpan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedSoal {
+    pub soal: String,
+    pub opt1: String,
+    pub opt2: String,
+    pub opt3: String,
+    pub opt4: String,
+    pub opt5: String,
+    pub correct_answer: String,
+    pub solution: String,
+}
+
 /// Hasil pengayaan dari AI.
 #[derive(Debug)]
 pub struct EnrichedContent {
@@ -385,6 +398,78 @@ impl AiService {
     }
 }
 
+impl AiService {
+    /// Generate soal pilihan ganda dari potongan teks materi. Sama pola
+    /// retry (primary lalu fallback) seperti enrich_question. Butuh
+    /// max_tokens lebih besar dari base config karena generate `count` soal
+    /// sekaligus dalam satu balasan, bukan satu field.
+    pub async fn generate_soal(
+        &self,
+        materi: &str,
+        group: &str,
+        source_text: &str,
+        count: u32,
+    ) -> Result<Vec<GeneratedSoal>, AiError> {
+        let (system, user) = Self::build_generate_prompt(materi, group, source_text, count);
+        let max_tokens = self.max_tokens.max(500 * count.max(1));
+
+        match self.primary.complete(&system, &user, max_tokens).await {
+            Ok((text, _, _)) => Self::parse_generated_soal(&text),
+            Err(primary_err) => match &self.fallback {
+                Some(fallback) => {
+                    eprintln!(
+                        "[AiService] generate_soal primary ({}) failed: {}. Trying fallback ({})...",
+                        self.primary.provider_name(),
+                        primary_err,
+                        fallback.provider_name(),
+                    );
+                    match fallback.complete(&system, &user, max_tokens).await {
+                        Ok((text, _, _)) => Self::parse_generated_soal(&text),
+                        Err(fallback_err) => Err(AiError::BothProvidersFailed(format!(
+                            "primary: {}, fallback: {}",
+                            primary_err, fallback_err
+                        ))),
+                    }
+                }
+                None => Err(primary_err),
+            },
+        }
+    }
+
+    fn build_generate_prompt(materi: &str, group: &str, source_text: &str, count: u32) -> (String, String) {
+        let system = "Kamu penyusun soal ujian tingkat menengah berbahasa Indonesia. Berdasarkan \
+            potongan materi yang diberikan, buat soal pilihan ganda (5 opsi, A-E) yang menguji \
+            PEMAHAMAN, bukan hafalan kata-per-kata. Satu jawaban benar tegas, 4 pengecoh masuk akal \
+            tapi jelas salah kalau materi dipahami. Balas HANYA sebagai array JSON -- jangan \
+            menjelaskan proses berpikirmu, jangan menyapa, jangan membungkus dengan markdown code \
+            fence, jangan menulis apa pun sebelum atau sesudah array JSON itu. Karakter pertama \
+            balasanmu harus '[' dan karakter terakhir harus ']'.\n\n\
+            Contoh format satu item (ulangi untuk tiap soal, semua field wajib diisi):\n\
+            {\"soal\": \"Apa fungsi utama dari X?\", \"opt1\": \"...\", \"opt2\": \"...\", \"opt3\": \"...\", \"opt4\": \"...\", \"opt5\": \"...\", \"correct_answer\": \"opt2\", \"solution\": \"Penjelasan singkat kenapa opt2 benar, mengutip bagian materi.\"}"
+            .to_string();
+
+        let user = format!(
+            "Materi: {materi}\n\
+             Grup/topik: {group}\n\n\
+             Teks:\n\"{source_text}\"\n\n\
+             Buat {count} soal dari teks ini.",
+        );
+
+        (system, user)
+    }
+
+    fn parse_generated_soal(text: &str) -> Result<Vec<GeneratedSoal>, AiError> {
+        let extracted = extract_json_array(text);
+        serde_json::from_str::<Vec<GeneratedSoal>>(extracted).map_err(|e| {
+            AiError::ParseError(format!(
+                "Invalid JSON array from AI: {} (raw snippet: {})",
+                e,
+                &text[..text.len().min(500)]
+            ))
+        })
+    }
+}
+
 /// Ekstrak blok `{ ... }` terluar dari teks AI (strip markdown fences + leading text).
 fn extract_json_object(text: &str) -> &str {
     // 1. Strip markdown code fences: ```json ... ``` atau ``` ... ```
@@ -407,6 +492,32 @@ fn extract_json_object(text: &str) -> &str {
 
     // 2. Cari { ... } terluar
     if let (Some(start), Some(end)) = (inner.find('{'), inner.rfind('}')) {
+        &inner[start..=end]
+    } else {
+        inner
+    }
+}
+
+/// Ekstrak blok `[ ... ]` terluar dari teks AI (strip markdown fences + leading text).
+fn extract_json_array(text: &str) -> &str {
+    let text = text.trim();
+    let inner = if text.starts_with("```") {
+        let after = if text.starts_with("```json") {
+            &text["```json".len()..]
+        } else {
+            &text["```".len()..]
+        };
+        let trimmed = after.trim_start();
+        if let Some(end) = trimmed.rfind("```") {
+            trimmed[..end].trim()
+        } else {
+            trimmed
+        }
+    } else {
+        text
+    };
+
+    if let (Some(start), Some(end)) = (inner.find('['), inner.rfind(']')) {
         &inner[start..=end]
     } else {
         inner
