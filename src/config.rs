@@ -27,10 +27,24 @@ struct DaoConfig {
 }
 
 #[derive(Deserialize, Clone)]
-struct GoogleOAuthConfig {
+pub struct GoogleOAuthConfig {
     client_id: String,
     client_secret: String,
     redirect_uri: String,
+}
+
+impl GoogleOAuthConfig {
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    pub fn client_secret(&self) -> &str {
+        &self.client_secret
+    }
+
+    pub fn redirect_uri(&self) -> &str {
+        &self.redirect_uri
+    }
 }
 
 #[derive(Deserialize, Clone, Default)]
@@ -84,6 +98,8 @@ pub struct Config {
     ai: Option<AiConfig>,
     #[serde(default)]
     upload_dir: Option<String>,
+    #[serde(default)]
+    google_oauth_upkp: Option<GoogleOAuthConfig>,
 }
 
 impl Config {
@@ -157,6 +173,10 @@ impl Config {
 
     pub fn get_google_redirect_uri(&self) -> &str {
         &self.google_oauth.redirect_uri
+    }
+
+    pub fn get_google_oauth_upkp(&self) -> Option<&GoogleOAuthConfig> {
+        self.google_oauth_upkp.as_ref()
     }
 
     pub fn get_mayar_api_key(&self) -> &str {

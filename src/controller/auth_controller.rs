@@ -56,6 +56,8 @@ async fn assign_auto_username(
 #[derive(Debug, Serialize, Deserialize)]
 pub struct GoogleAuthRequest {
     pub code: String,
+    #[serde(default)]
+    pub app: Option<String>,
 }
 
 /// JWT Claims structure
@@ -255,12 +257,26 @@ async fn google_callback(
     app_state: web::Data<AppState<'_>>,
     http_request: HttpRequest,
 ) -> impl Responder {
+    // Pick OAuth client credentials based on the requesting app (additive; default path unchanged)
+    let (client_id, client_secret, redirect_uri) = match request.app.as_deref() {
+        Some("upkp") => {
+            match app_state.config.get_google_oauth_upkp() {
+                Some(cfg) => (cfg.client_id(), cfg.client_secret(), cfg.redirect_uri()),
+                None => {
+                    return HttpResponse::InternalServerError()
+                        .body("Google OAuth not configured for app \"upkp\"")
+                }
+            }
+        }
+        _ => (
+            app_state.config.get_google_client_id(),
+            app_state.config.get_google_client_secret(),
+            app_state.config.get_google_redirect_uri(),
+        ),
+    };
+
     // Create Google OAuth client
-    let google_client = GoogleOAuthClient::new(
-        app_state.config.get_google_client_id(),
-        app_state.config.get_google_client_secret(),
-        app_state.config.get_google_redirect_uri(),
-    );
+    let google_client = GoogleOAuthClient::new(client_id, client_secret, redirect_uri);
 
     // Exchange authorization code for token
     let token_result = google_client.exchange_code_for_token(&request.code).await;
