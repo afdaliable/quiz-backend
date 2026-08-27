@@ -25,11 +25,11 @@ struct BasicUserStats {
 impl<'c> FromRow<'c, MySqlRow> for BasicUserStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(BasicUserStats {
-            total_users: row.get("total_users"),
-            new_users_today: row.get("new_users_today"),
-            new_users_this_week: row.get("new_users_this_week"),
-            new_users_this_month: row.get("new_users_this_month"),
-            active_users_today: row.get("active_users_today"),
+            total_users: row.try_get("total_users")?,
+            new_users_today: row.try_get("new_users_today")?,
+            new_users_this_week: row.try_get("new_users_this_week")?,
+            new_users_this_month: row.try_get("new_users_this_month")?,
+            active_users_today: row.try_get("active_users_today")?,
         })
     }
 }
@@ -47,12 +47,12 @@ struct BasicSessionStats {
 impl<'c> FromRow<'c, MySqlRow> for BasicSessionStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(BasicSessionStats {
-            total_sessions: row.get("total_sessions"),
-            completed_sessions: row.get("completed_sessions"),
-            active_sessions: row.get("active_sessions"),
-            sessions_today: row.get("sessions_today"),
-            sessions_this_week: row.get("sessions_this_week"),
-            sessions_this_month: row.get("sessions_this_month"),
+            total_sessions: row.try_get("total_sessions")?,
+            completed_sessions: row.try_get("completed_sessions")?,
+            active_sessions: row.try_get("active_sessions")?,
+            sessions_today: row.try_get("sessions_today")?,
+            sessions_this_week: row.try_get("sessions_this_week")?,
+            sessions_this_month: row.try_get("sessions_this_month")?,
         })
     }
 }
@@ -67,9 +67,9 @@ struct BasicRevenueStats {
 impl<'c> FromRow<'c, MySqlRow> for BasicRevenueStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(BasicRevenueStats {
-            total_revenue: row.get("total_revenue"),
-            revenue_this_month: row.get("revenue_this_month"),
-            revenue_last_month: row.get("revenue_last_month"),
+            total_revenue: row.try_get("total_revenue")?,
+            revenue_this_month: row.try_get("revenue_this_month")?,
+            revenue_last_month: row.try_get("revenue_last_month")?,
         })
     }
 }
@@ -83,8 +83,8 @@ struct SubscriptionStats {
 impl<'c> FromRow<'c, MySqlRow> for SubscriptionStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(SubscriptionStats {
-            active_subscriptions: row.get("active_subscriptions"),
-            expired_subscriptions: row.get("expired_subscriptions"),
+            active_subscriptions: row.try_get("active_subscriptions")?,
+            expired_subscriptions: row.try_get("expired_subscriptions")?,
         })
     }
 }

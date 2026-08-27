@@ -20,14 +20,14 @@ pub struct DashboardStats {
 impl<'c> FromRow<'c, MySqlRow> for DashboardStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(DashboardStats {
-            total_users: row.get("total_users"),
-            active_users: row.get("active_users"),
-            total_questions: row.get("total_questions"),
-            total_packages: row.get("total_packages"),
-            total_categories: row.get("total_categories"),
-            active_sessions: row.get("active_sessions"),
-            premium_subscriptions: row.get("premium_subscriptions"),
-            revenue_this_month: row.get("revenue_this_month"),
+            total_users: row.try_get("total_users")?,
+            active_users: row.try_get("active_users")?,
+            total_questions: row.try_get("total_questions")?,
+            total_packages: row.try_get("total_packages")?,
+            total_categories: row.try_get("total_categories")?,
+            active_sessions: row.try_get("active_sessions")?,
+            premium_subscriptions: row.try_get("premium_subscriptions")?,
+            revenue_this_month: row.try_get("revenue_this_month")?,
         })
     }
 }
@@ -53,8 +53,8 @@ pub struct UserProviderStats {
 impl<'c> FromRow<'c, MySqlRow> for UserProviderStats {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(UserProviderStats {
-            provider: row.get("provider"),
-            count: row.get("count"),
+            provider: row.try_get("provider")?,
+            count: row.try_get("count")?,
         })
     }
 }
@@ -68,8 +68,8 @@ pub struct DailyGrowth {
 impl<'c> FromRow<'c, MySqlRow> for DailyGrowth {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(DailyGrowth {
-            date: row.get("date"),
-            count: row.get("count"),
+            date: row.try_get("date")?,
+            count: row.try_get("count")?,
         })
     }
 }
@@ -98,9 +98,9 @@ pub struct PopularPackage {
 impl<'c> FromRow<'c, MySqlRow> for PopularPackage {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(PopularPackage {
-            package_name: row.get("package_name"),
-            category_name: row.get("category_name"),
-            session_count: row.get("session_count"),
+            package_name: row.try_get("package_name")?,
+            category_name: row.try_get("category_name")?,
+            session_count: row.try_get("session_count")?,
         })
     }
 }
@@ -116,10 +116,10 @@ pub struct PackageCompletionRate {
 impl<'c> FromRow<'c, MySqlRow> for PackageCompletionRate {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(PackageCompletionRate {
-            package_name: row.get("package_name"),
-            total_sessions: row.get("total_sessions"),
-            completed_sessions: row.get("completed_sessions"),
-            completion_rate: row.get("completion_rate"),
+            package_name: row.try_get("package_name")?,
+            total_sessions: row.try_get("total_sessions")?,
+            completed_sessions: row.try_get("completed_sessions")?,
+            completion_rate: row.try_get("completion_rate")?,
         })
     }
 }
@@ -147,9 +147,9 @@ pub struct RevenuePlan {
 impl<'c> FromRow<'c, MySqlRow> for RevenuePlan {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(RevenuePlan {
-            plan_name: row.get("plan_name"),
-            active_subscriptions: row.get("active_subscriptions"),
-            total_revenue: row.get("total_revenue"),
+            plan_name: row.try_get("plan_name")?,
+            active_subscriptions: row.try_get("active_subscriptions")?,
+            total_revenue: row.try_get("total_revenue")?,
         })
     }
 }
@@ -163,8 +163,8 @@ pub struct MonthlyRevenue {
 impl<'c> FromRow<'c, MySqlRow> for MonthlyRevenue {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(MonthlyRevenue {
-            month: row.get("month"),
-            revenue: row.get("revenue"),
+            month: row.try_get("month")?,
+            revenue: row.try_get("revenue")?,
         })
     }
 }
