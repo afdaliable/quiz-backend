@@ -252,7 +252,7 @@ fn detect_missing_context(soal: &str, opts: &[&str], seq_re: &Regex) -> bool {
 struct ContextCandidateRow {
     id: i64,
     soal: String,
-    opt1: String,
+    opt1: Option<String>,
     opt2: Option<String>,
     opt3: Option<String>,
     opt4: Option<String>,
@@ -307,7 +307,7 @@ async fn list_missing_context(data: web::Data<AppState<'_>>) -> impl Responder {
         .into_iter()
         .filter(|r| {
             let opts: Vec<&str> = [
-                Some(r.opt1.as_str()),
+                r.opt1.as_deref(),
                 r.opt2.as_deref(),
                 r.opt3.as_deref(),
                 r.opt4.as_deref(),
