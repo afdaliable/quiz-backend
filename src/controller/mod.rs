@@ -24,6 +24,7 @@ pub mod admin_analytics_controller;
 pub mod admin_passage_controller;
 pub mod materi_generate_controller;
 pub mod taxonomy_classify_controller;
+pub mod soal_quality_controller;
 
 // Internal endpoints (IP + API key restricted, no OAuth)
 pub mod internal_soal_controller;
@@ -68,6 +69,7 @@ pub use admin_alerts_controller::init as init_admin_alerts_controller;
 pub use admin_passage_controller::init as init_admin_passage_controller;
 pub use materi_generate_controller::init as init_materi_generate_controller;
 pub use taxonomy_classify_controller::init as init_taxonomy_classify_controller;
+pub use soal_quality_controller::init as init_soal_quality_controller;
 
 // Internal endpoint exports
 pub use internal_soal_controller::init as init_internal_soal_controller;
