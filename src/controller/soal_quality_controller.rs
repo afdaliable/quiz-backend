@@ -214,12 +214,132 @@ async fn fix_merged_options(
     })
 }
 
+// --- Detector 2: soal that reads like it depends on a scenario/passage that
+// was never captured -- e.g. "Hari ini Mita memiliki beberapa agenda untuk
+// dilakukan..." followed by options describing an order of events ("pergi
+// ke pasar", "mengunjungi nenek") that appear nowhere in the stem. Confirmed
+// live: `passages` has only 28 rows total and none mention Mita/agenda --
+// the source paragraph was never scraped, so it can't be recovered, only
+// flagged for a human to fix or drop.
+//
+// Read-only detector, no auto-fix: a generic "options don't share vocabulary
+// with the stem" heuristic was tried first and flagged ~38% of all soal
+// (20451/54067) -- most SKD/factual-recall questions naturally have options
+// that are the *answer*, not a restatement of the stem, so raw overlap is
+// useless here. Narrowing to "sequence words (pertama/sebelum/setelah/...)
+// appear in >=2 options but not in the stem itself, restricted to
+// reasoning-type pelajaran where this actually indicates a missing clue
+// list" cut it to 18 candidates on live data, all plausible.
+fn has_sequence_words(text: &str, re: &Regex) -> bool {
+    re.is_match(text)
+}
+
+fn detect_missing_context(soal: &str, opts: &[&str], seq_re: &Regex) -> bool {
+    if opts.len() < 3 {
+        return false;
+    }
+    let seq_opt_count = opts.iter().filter(|o| has_sequence_words(o, seq_re)).count();
+    if seq_opt_count < 2 {
+        return false;
+    }
+    if has_sequence_words(soal, seq_re) || soal.contains(':') || soal.chars().count() > 400 {
+        return false;
+    }
+    true
+}
+
+#[derive(sqlx::FromRow)]
+struct ContextCandidateRow {
+    id: i64,
+    soal: String,
+    opt1: String,
+    opt2: Option<String>,
+    opt3: Option<String>,
+    opt4: Option<String>,
+    opt5: Option<String>,
+    modul: Option<String>,
+    pelajaran: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MissingContextItem {
+    id: i64,
+    soal: String,
+    modul: Option<String>,
+    pelajaran: Option<String>,
+}
+
+#[derive(Serialize)]
+struct MissingContextResponse {
+    total: usize,
+    items: Vec<MissingContextItem>,
+}
+
+/// GET /admin/soal-quality/missing-context
+#[get("/missing-context")]
+async fn list_missing_context(data: web::Data<AppState<'_>>) -> impl Responder {
+    let pool = &*data.context.soal.pool;
+    let rows = match sqlx::query_as::<_, ContextCandidateRow>(
+        r#"
+        SELECT id, soal, opt1, opt2, opt3, opt4, opt5, modul, pelajaran
+        FROM dbquizapp.soal
+        WHERE passage_id IS NULL
+          AND pelajaran IN ('TIU (Tes Intelegensi Umum)', 'Penalaran Verbal', 'Penalaran Analitis')
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[soal_quality_controller] DB error: {:?}", e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to query soal."));
+        }
+    };
+
+    let seq_re = Regex::new(
+        r"(?i)\b(pertama|kedua|ketiga|sebelum|sesudah|setelah|kemudian|selanjutnya|akhirnya|terakhir)\b",
+    )
+    .unwrap();
+
+    let items: Vec<MissingContextItem> = rows
+        .into_iter()
+        .filter(|r| {
+            let opts: Vec<&str> = [
+                Some(r.opt1.as_str()),
+                r.opt2.as_deref(),
+                r.opt3.as_deref(),
+                r.opt4.as_deref(),
+                r.opt5.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|o| !o.trim().is_empty())
+            .collect();
+            detect_missing_context(&r.soal, &opts, &seq_re)
+        })
+        .map(|r| MissingContextItem {
+            id: r.id,
+            soal: r.soal,
+            modul: r.modul,
+            pelajaran: r.pelajaran,
+        })
+        .collect();
+
+    HttpResponse::Ok().json(MissingContextResponse {
+        total: items.len(),
+        items,
+    })
+}
+
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/soal-quality")
             .wrap(AdminMiddleware::new())
             .service(list_merged_options)
-            .service(fix_merged_options),
+            .service(fix_merged_options)
+            .service(list_missing_context),
     );
 }
 
@@ -260,5 +380,48 @@ mod tests {
     #[test]
     fn rejects_garbage_two_letter_only() {
         assert!(split_merged_options("B. C.").is_none());
+    }
+
+    fn seq_re() -> Regex {
+        Regex::new(
+            r"(?i)\b(pertama|kedua|ketiga|sebelum|sesudah|setelah|kemudian|selanjutnya|akhirnya|terakhir)\b",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn flags_narrative_with_scattered_sequence_options() {
+        let soal = "Hari ini Mita memiliki beberapa agenda untuk dilakukan. Pernyataan yang benar adalah …";
+        let opts = vec![
+            "Hal pertama yang dilakukan Mita adalah pergi ke pasar",
+            "Mita mengajar siswa les setelah mengunjungi nenek",
+            "Sebelum ke pasar, Mita mengunjungi nenek",
+        ];
+        assert!(detect_missing_context(soal, &opts, &seq_re()));
+    }
+
+    #[test]
+    fn does_not_flag_self_contained_factual_question() {
+        let soal = "Rasio pembelian ulang menunjukkan ....";
+        let opts = vec!["Loyalitas pelanggan", "Tingkat retensi", "Nilai transaksi"];
+        assert!(!detect_missing_context(soal, &opts, &seq_re()));
+    }
+
+    #[test]
+    fn does_not_flag_when_stem_already_states_the_sequence() {
+        let soal = "Setelah makan siang, budi pergi ke kantor. Pertama dia mengecek email, sebelum rapat pukul 2.";
+        let opts = vec![
+            "Budi rapat sebelum makan siang",
+            "Budi mengecek email pertama",
+            "Setelah rapat budi pulang",
+        ];
+        assert!(!detect_missing_context(soal, &opts, &seq_re()));
+    }
+
+    #[test]
+    fn does_not_flag_with_fewer_than_two_sequence_options() {
+        let soal = "Manakah pernyataan yang benar?";
+        let opts = vec!["Pertama, dia lulus ujian", "Dia bekerja di bank", "Dia menikah tahun lalu"];
+        assert!(!detect_missing_context(soal, &opts, &seq_re()));
     }
 }
