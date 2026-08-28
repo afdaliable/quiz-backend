@@ -11,6 +11,8 @@ use actix_web::{get, post, web, HttpResponse, Responder};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::MySqlPool;
+use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::middleware::admin_middleware::AdminMiddleware;
 use crate::AppState;
@@ -152,34 +154,87 @@ struct FixResponse {
     failed: usize,
 }
 
-/// POST /admin/soal-quality/merged-options/fix
+#[derive(Serialize)]
+struct FixJobAcceptedResponse {
+    job_id: String,
+    status: String,
+    poll_url: String,
+}
+
+#[derive(Serialize)]
+struct FixJobStatusResponse {
+    job_id: String,
+    status: String,
+    result: Option<FixResponse>,
+    error_message: Option<String>,
+    completed_at: Option<String>,
+}
+
+/// POST /admin/soal-quality/merged-options/fix -- runs as an async job.
+/// Looping a few hundred sequential row UPDATEs synchronously trips
+/// Cloudflare's proxy timeout on the Free plan (confirmed live: 504 on
+/// ~660 rows), same reasoning as the AI job endpoints even though no AI
+/// is involved here.
 #[post("/merged-options/fix")]
 async fn fix_merged_options(
     body: web::Json<FixRequest>,
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
-    let pool = &*data.context.soal.pool;
-    let rows = match fetch_merged_option_rows(pool).await {
+    let pool = Arc::clone(&data.context.soal.pool);
+    let ids = body.ids.clone();
+
+    let job_id = Uuid::new_v4().to_string();
+    if let Err(e) = sqlx::query(
+        "INSERT INTO dbquizapp.soal_quality_fix_jobs (id, status) VALUES (?, 'pending')",
+    )
+    .bind(&job_id)
+    .execute(&*pool)
+    .await
+    {
+        eprintln!("[soal_quality_controller] Failed to insert fix job: {:?}", e);
+        return HttpResponse::InternalServerError().json(err("db_error", "Failed to create job."));
+    }
+
+    let job_id_clone = job_id.clone();
+    tokio::spawn(async move {
+        run_fix_job(job_id_clone, ids, pool).await;
+    });
+
+    HttpResponse::Accepted().json(FixJobAcceptedResponse {
+        poll_url: format!("/admin/soal-quality/merged-options/fix/{}", job_id),
+        job_id,
+        status: "pending".to_string(),
+    })
+}
+
+async fn run_fix_job(job_id: String, ids: Vec<i64>, pool: Arc<MySqlPool>) {
+    let _ = sqlx::query("UPDATE dbquizapp.soal_quality_fix_jobs SET status='running' WHERE id=?")
+        .bind(&job_id)
+        .execute(&*pool)
+        .await;
+
+    let rows = match fetch_merged_option_rows(&pool).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[soal_quality_controller] DB error: {:?}", e);
-            return HttpResponse::InternalServerError().json(err("db_error", "Failed to query soal."));
+            let msg = format!("Failed to query soal: {}", e);
+            let _ = sqlx::query(
+                "UPDATE dbquizapp.soal_quality_fix_jobs SET status='failed', error_message=?, completed_at=NOW() WHERE id=?",
+            )
+            .bind(&msg)
+            .bind(&job_id)
+            .execute(&*pool)
+            .await;
+            return;
         }
     };
 
-    let target: Box<dyn Fn(i64) -> bool> = if body.ids.is_empty() {
-        Box::new(|_| true)
-    } else {
-        let ids = body.ids.clone();
-        Box::new(move |id| ids.contains(&id))
-    };
-
-    let mut fixed = 0;
-    let mut skipped_not_auto_fixable = 0;
-    let mut failed = 0;
+    let mut fixed = 0usize;
+    let mut skipped_not_auto_fixable = 0usize;
+    let mut failed = 0usize;
 
     for row in rows {
-        if !target(row.id) {
+        if !ids.is_empty() && !ids.contains(&row.id) {
             continue;
         }
         let Some(split) = split_merged_options(&row.opt1) else {
@@ -195,7 +250,7 @@ async fn fix_merged_options(
         .bind(&split[3])
         .bind(&split[4])
         .bind(row.id)
-        .execute(pool)
+        .execute(&*pool)
         .await;
 
         match result {
@@ -207,10 +262,66 @@ async fn fix_merged_options(
         }
     }
 
-    HttpResponse::Ok().json(FixResponse {
-        fixed,
-        skipped_not_auto_fixable,
-        failed,
+    let _ = sqlx::query(
+        "UPDATE dbquizapp.soal_quality_fix_jobs SET status='completed', fixed=?, skipped_not_auto_fixable=?, failed_count=?, completed_at=NOW() WHERE id=?",
+    )
+    .bind(fixed as i32)
+    .bind(skipped_not_auto_fixable as i32)
+    .bind(failed as i32)
+    .bind(&job_id)
+    .execute(&*pool)
+    .await;
+}
+
+/// GET /admin/soal-quality/merged-options/fix/{job_id}
+#[get("/merged-options/fix/{job_id}")]
+async fn get_fix_job(path: web::Path<String>, data: web::Data<AppState<'_>>) -> impl Responder {
+    let job_id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    #[derive(sqlx::FromRow)]
+    struct JobRow {
+        status: String,
+        fixed: Option<i32>,
+        skipped_not_auto_fixable: Option<i32>,
+        failed_count: Option<i32>,
+        error_message: Option<String>,
+        completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    }
+
+    let job: JobRow = match sqlx::query_as::<_, JobRow>(
+        "SELECT status, fixed, skipped_not_auto_fixable, failed_count, error_message, completed_at FROM dbquizapp.soal_quality_fix_jobs WHERE id = ?",
+    )
+    .bind(&job_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(j)) => j,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(err("not_found", format!("Job {} not found", job_id)))
+        }
+        Err(e) => {
+            eprintln!("[soal_quality_controller] DB error fetching fix job {}: {:?}", job_id, e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to fetch job status."));
+        }
+    };
+
+    let result = if job.status == "completed" {
+        Some(FixResponse {
+            fixed: job.fixed.unwrap_or(0) as usize,
+            skipped_not_auto_fixable: job.skipped_not_auto_fixable.unwrap_or(0) as usize,
+            failed: job.failed_count.unwrap_or(0) as usize,
+        })
+    } else {
+        None
+    };
+
+    HttpResponse::Ok().json(FixJobStatusResponse {
+        job_id,
+        status: job.status,
+        result,
+        error_message: job.error_message,
+        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
     })
 }
 
@@ -339,6 +450,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .wrap(AdminMiddleware::new())
             .service(list_merged_options)
             .service(fix_merged_options)
+            .service(get_fix_job)
             .service(list_missing_context),
     );
 }
