@@ -147,8 +147,13 @@ impl<'c> FromRow<'c, MySqlRow> for Soal {
             format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
             source: row.try_get("source").unwrap_or(None),
             status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
-            p_value: row.try_get("p_value").unwrap_or(None),
-            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            // p_value/avg_time_sec are DB `float` (4 bytes) -- decoding them
+            // straight into Rust f64 (8 bytes) makes sqlx's binary-protocol
+            // decoder panic ("range end index 8 out of range for slice of
+            // length 4") instead of returning an Err, since it's a raw byte
+            // read, not a checked conversion. Decode as f32, widen after.
+            p_value: row.try_get::<Option<f32>, _>("p_value").unwrap_or(None).map(|v| v as f64),
+            avg_time_sec: row.try_get::<Option<f32>, _>("avg_time_sec").unwrap_or(None).map(|v| v as f64),
             attempt_count: row.try_get("attempt_count").unwrap_or(0),
         })
     }
@@ -257,8 +262,13 @@ impl<'c> FromRow<'c, MySqlRow> for AdminSoal {
             format: row.try_get("format").unwrap_or_else(|_| "pg".to_string()),
             source: row.try_get("source").unwrap_or(None),
             status: row.try_get("status").unwrap_or_else(|_| "draft".to_string()),
-            p_value: row.try_get("p_value").unwrap_or(None),
-            avg_time_sec: row.try_get("avg_time_sec").unwrap_or(None),
+            // p_value/avg_time_sec are DB `float` (4 bytes) -- decoding them
+            // straight into Rust f64 (8 bytes) makes sqlx's binary-protocol
+            // decoder panic ("range end index 8 out of range for slice of
+            // length 4") instead of returning an Err, since it's a raw byte
+            // read, not a checked conversion. Decode as f32, widen after.
+            p_value: row.try_get::<Option<f32>, _>("p_value").unwrap_or(None).map(|v| v as f64),
+            avg_time_sec: row.try_get::<Option<f32>, _>("avg_time_sec").unwrap_or(None).map(|v| v as f64),
             attempt_count: row.try_get("attempt_count").unwrap_or(0),
             created_at: row.try_get("created_at").unwrap_or(None),
             updated_at: row.try_get("updated_at").unwrap_or(None),
