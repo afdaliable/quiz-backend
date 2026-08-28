@@ -461,16 +461,24 @@ impl AdminHierarchyDao {
     // ── Topics ────────────────────────────────────────────────────────────────
 
     pub async fn get_topics(&self, subcategory_id: Option<&str>) -> Result<Vec<Topic>, sqlx::Error> {
-        // AFD-226: count includes direct FK + questions via question_topics M2M
+        // AFD-226: count includes direct FK + questions via question_topics M2M.
+        // Grouped LEFT JOIN over a UNION, not a per-row correlated subquery: the
+        // old `WHERE s.topic_id = tp.id OR s.id IN (...)` shape ran once per
+        // topic row and the OR disabled index use on soal.topic_id, so listing
+        // all 1330 topics did a near-full-table scan 1330 times over and hung
+        // indefinitely in production. This does one pass instead.
         if let Some(sid) = subcategory_id {
             sqlx::query_as::<_, Topic>(r#"
                 SELECT tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order,
-                       (SELECT COUNT(DISTINCT s.id) FROM soal s
-                        WHERE s.topic_id = tp.id
-                           OR s.id IN (SELECT question_id FROM question_topics WHERE topic_id = tp.id)
-                       ) AS question_count
+                       COUNT(DISTINCT combined.soal_id) AS question_count
                 FROM topics tp
+                LEFT JOIN (
+                    SELECT topic_id, id AS soal_id FROM soal WHERE topic_id IS NOT NULL
+                    UNION
+                    SELECT topic_id, question_id AS soal_id FROM question_topics
+                ) combined ON combined.topic_id = tp.id
                 WHERE tp.subcategory_id = ?
+                GROUP BY tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order
                 ORDER BY tp.sort_order
             "#)
             .bind(sid)
@@ -479,11 +487,14 @@ impl AdminHierarchyDao {
         } else {
             sqlx::query_as::<_, Topic>(r#"
                 SELECT tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order,
-                       (SELECT COUNT(DISTINCT s.id) FROM soal s
-                        WHERE s.topic_id = tp.id
-                           OR s.id IN (SELECT question_id FROM question_topics WHERE topic_id = tp.id)
-                       ) AS question_count
+                       COUNT(DISTINCT combined.soal_id) AS question_count
                 FROM topics tp
+                LEFT JOIN (
+                    SELECT topic_id, id AS soal_id FROM soal WHERE topic_id IS NOT NULL
+                    UNION
+                    SELECT topic_id, question_id AS soal_id FROM question_topics
+                ) combined ON combined.topic_id = tp.id
+                GROUP BY tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order
                 ORDER BY tp.sort_order
             "#)
             .fetch_all(&*self.pool)
