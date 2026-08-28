@@ -66,12 +66,18 @@ pub async fn get_package_questions(
         .await
     {
         Ok(rows) => {
-            let items: Vec<PaketSoalItemWithDetails> = rows
+            let items: Result<Vec<PaketSoalItemWithDetails>, sqlx::Error> = rows
                 .iter()
-                .map(|row| PaketSoalItemWithDetails::from_row(row).unwrap())
+                .map(PaketSoalItemWithDetails::from_row)
                 .collect();
-            
-            Ok(HttpResponse::Ok().json(items))
+
+            match items {
+                Ok(items) => Ok(HttpResponse::Ok().json(items)),
+                Err(err) => {
+                    eprintln!("Error parsing package questions: {}", err);
+                    Ok(HttpResponse::InternalServerError().json("Failed to parse package questions"))
+                }
+            }
         }
         Err(err) => {
             eprintln!("Error fetching package questions: {}", err);
@@ -133,12 +139,18 @@ pub async fn get_available_questions(
         .await
     {
         Ok(rows) => {
-            let questions: Vec<AvailableSoal> = rows
+            let questions: Result<Vec<AvailableSoal>, sqlx::Error> = rows
                 .iter()
-                .map(|row| AvailableSoal::from_row(row).unwrap())
+                .map(AvailableSoal::from_row)
                 .collect();
-            
-            Ok(HttpResponse::Ok().json(questions))
+
+            match questions {
+                Ok(questions) => Ok(HttpResponse::Ok().json(questions)),
+                Err(err) => {
+                    eprintln!("Error parsing available questions: {}", err);
+                    Ok(HttpResponse::InternalServerError().json("Failed to parse available questions"))
+                }
+            }
         }
         Err(err) => {
             eprintln!("Error fetching available questions: {}", err);
