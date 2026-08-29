@@ -351,6 +351,59 @@ impl RedisService {
         con.del(format!("quiz:{}", cache_key_hash)).await
     }
 
+    /// Hapus cache `/paket-soal-response` untuk setiap paket yang memuat
+    /// salah satu `question_ids` -- dipanggil setiap kali isi soal berubah
+    /// (PUT /admin/soal/{id}, AI-enrich save, merged-options bulk fix).
+    ///
+    /// Ditemukan lewat laporan live: dua soal yang isinya sudah benar di DB
+    /// masih terlihat seperti versi lama (merged-options defect) di sisi
+    /// murid. get_paket_soal_response's cache key adalah md5("{kategori}:
+    /// {nama_paket}") dengan TTL 1 jam -- tidak ada satu pun soal-write path
+    /// yang pernah menghapusnya, jadi tiap edit soal bisa membuat murid
+    /// melihat konten basi sampai TTL habis sendiri.
+    pub async fn invalidate_paket_soal_response_for_questions(
+        pool: &sqlx::MySqlPool,
+        redis_pool: &RedisPool,
+        question_ids: &[i32],
+    ) {
+        if question_ids.is_empty() {
+            return;
+        }
+        let placeholders: Vec<String> = question_ids.iter().map(|_| "?".to_string()).collect();
+        let query = format!(
+            r#"
+            SELECT DISTINCT k.nama_kategori, ps.nama_paket_soal
+            FROM dbquizapp.paket_soal_items psi
+            JOIN dbquizapp.paket_soal ps ON ps.id = psi.paket_soal_id
+            JOIN dbquizapp.kategori_soal k ON k.id = ps.kategori_id
+            WHERE psi.soal_id IN ({})
+            "#,
+            placeholders.join(", ")
+        );
+        let mut q = sqlx::query_as::<_, (String, String)>(&query);
+        for id in question_ids {
+            q = q.bind(id);
+        }
+        let pairs = match q.fetch_all(pool).await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[redis_service] Failed to look up packages for cache invalidation: {:?}", e);
+                return;
+            }
+        };
+        if pairs.is_empty() {
+            return;
+        }
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        for (kategori, paket) in pairs {
+            let cache_key = format!("{}:{}", kategori, paket);
+            let hash = format!("{:x}", md5::compute(&cache_key));
+            if let Err(e) = Self::invalidate_paket_soal_response(&mut con, &hash).await {
+                eprintln!("[redis_service] Failed to invalidate cache for {}: {:?}", cache_key, e);
+            }
+        }
+    }
+
     // ── Active quiz session caching (DB 2: progress_manager) ─────────────
 
     /// Simpan sesi quiz aktif ke Redis dengan TTL 4 jam.

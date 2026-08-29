@@ -215,6 +215,7 @@ async fn enrich_question(
         pool_arc,
         ai_service,
         admin_email,
+        data.redis_pool.clone(),
     )
     .await
     {
@@ -311,6 +312,7 @@ async fn bulk_enrich(
         pool_arc,
         ai_service,
         admin_email,
+        data.redis_pool.clone(),
     )
     .await
     {
@@ -344,6 +346,7 @@ async fn spawn_enrich_job(
     pool: Arc<MySqlPool>,
     ai_service: Arc<AiService>,
     admin_email: String,
+    redis_pool: Option<Arc<crate::service::redis_service::RedisPool>>,
 ) -> Result<(String, i32), sqlx::Error> {
     let job_id = Uuid::new_v4().to_string();
     let fields_json = serde_json::to_string(&fields).unwrap_or_else(|_| "[]".to_string());
@@ -378,6 +381,7 @@ async fn spawn_enrich_job(
             pool,
             ai_service,
             admin_email,
+            redis_pool,
         )
         .await;
     });
@@ -530,6 +534,7 @@ async fn run_bulk_job(
     pool: Arc<MySqlPool>,
     ai_service: Arc<AiService>,
     admin_email: String,
+    redis_pool: Option<Arc<crate::service::redis_service::RedisPool>>,
 ) {
     // Mark running
     let _ = sqlx::query(
@@ -563,6 +568,7 @@ async fn run_bulk_job(
             &pool,
             &ai_service,
             &admin_email,
+            redis_pool.as_deref(),
         )
         .await;
 
@@ -613,6 +619,7 @@ async fn enrich_single_for_job(
     pool: &MySqlPool,
     ai_service: &AiService,
     admin_email: &str,
+    redis_pool: Option<&crate::service::redis_service::RedisPool>,
 ) -> bool {
     // Fetch soal
     let soal = match fetch_soal(pool, question_id).await {
@@ -680,6 +687,16 @@ async fn enrich_single_for_job(
             .is_err()
         {
             return false;
+        }
+        // Content changed -- drop any cached /paket-soal-response for
+        // packages containing this question, or students keep seeing the
+        // pre-enrich version until the 1h cache TTL expires.
+        if let Some(redis_pool) = redis_pool {
+            crate::service::redis_service::RedisService::invalidate_paket_soal_response_for_questions(
+                pool,
+                redis_pool,
+                &[question_id as i32],
+            ).await;
         }
     }
 

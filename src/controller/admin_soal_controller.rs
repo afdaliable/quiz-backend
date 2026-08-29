@@ -4,6 +4,7 @@ use crate::model::soal::{Soal, AdminSoal, UpdateSoalRequest, QuestionSearchReque
 use crate::model::paket_soal::{SoalPackageItem, SoalPackagesResponse, SoalCoverageStats};
 use crate::dao::taxonomy_dao::TaxonomyDao;
 use crate::service::csv_import_service::{CsvImportService, CsvImportConfig};
+use crate::service::redis_service::RedisService;
 use crate::AppState;
 use actix_web::{web, HttpResponse, Responder, HttpRequest, get, post, put, delete};
 use actix_multipart::Multipart;
@@ -464,6 +465,16 @@ async fn update_question(
                     if let Err(e) = taxonomy_dao.set_question_topics(question_id, topic_ids).await {
                         eprintln!("Error setting question topics: {:?}", e);
                     }
+                }
+                // Content changed -- drop any cached /paket-soal-response for
+                // packages containing this question, or students keep seeing
+                // the pre-edit version until the 1h cache TTL expires.
+                if let Some(redis_pool) = &data.redis_pool {
+                    RedisService::invalidate_paket_soal_response_for_questions(
+                        &data.context.soal.pool,
+                        redis_pool,
+                        &[question_id],
+                    ).await;
                 }
                 // Fetch the updated question
                 match data.context.soal.get_soal_by_id(&question_id.to_string()).await {

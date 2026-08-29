@@ -181,6 +181,7 @@ async fn fix_merged_options(
     data: web::Data<AppState<'_>>,
 ) -> impl Responder {
     let pool = Arc::clone(&data.context.soal.pool);
+    let redis_pool = data.redis_pool.clone();
     let ids = body.ids.clone();
 
     let job_id = Uuid::new_v4().to_string();
@@ -197,7 +198,7 @@ async fn fix_merged_options(
 
     let job_id_clone = job_id.clone();
     tokio::spawn(async move {
-        run_fix_job(job_id_clone, ids, pool).await;
+        run_fix_job(job_id_clone, ids, pool, redis_pool).await;
     });
 
     HttpResponse::Accepted().json(FixJobAcceptedResponse {
@@ -207,7 +208,12 @@ async fn fix_merged_options(
     })
 }
 
-async fn run_fix_job(job_id: String, ids: Vec<i64>, pool: Arc<MySqlPool>) {
+async fn run_fix_job(
+    job_id: String,
+    ids: Vec<i64>,
+    pool: Arc<MySqlPool>,
+    redis_pool: Option<Arc<crate::service::redis_service::RedisPool>>,
+) {
     let _ = sqlx::query("UPDATE dbquizapp.soal_quality_fix_jobs SET status='running' WHERE id=?")
         .bind(&job_id)
         .execute(&*pool)
@@ -232,6 +238,7 @@ async fn run_fix_job(job_id: String, ids: Vec<i64>, pool: Arc<MySqlPool>) {
     let mut fixed = 0usize;
     let mut skipped_not_auto_fixable = 0usize;
     let mut failed = 0usize;
+    let mut fixed_ids: Vec<i32> = Vec::new();
 
     for row in rows {
         if !ids.is_empty() && !ids.contains(&row.id) {
@@ -254,12 +261,29 @@ async fn run_fix_job(job_id: String, ids: Vec<i64>, pool: Arc<MySqlPool>) {
         .await;
 
         match result {
-            Ok(_) => fixed += 1,
+            Ok(_) => {
+                fixed += 1;
+                fixed_ids.push(row.id as i32);
+            }
             Err(e) => {
                 eprintln!("[soal_quality_controller] failed to fix soal {}: {:?}", row.id, e);
                 failed += 1;
             }
         }
+    }
+
+    // Content changed for every id in fixed_ids -- drop cached
+    // /paket-soal-response for any package containing them, or students
+    // keep seeing the pre-fix merged-options text until the 1h TTL expires.
+    // This is exactly the bug that shipped the original merged-options
+    // defect to students in the first place: the fix ran, the DB was
+    // correct, but nothing told Redis.
+    if let Some(redis_pool) = &redis_pool {
+        crate::service::redis_service::RedisService::invalidate_paket_soal_response_for_questions(
+            &pool,
+            redis_pool,
+            &fixed_ids,
+        ).await;
     }
 
     let _ = sqlx::query(
