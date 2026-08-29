@@ -63,7 +63,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminPaketSoal {
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct AdminPaketSoalRequest {
     pub nama_paket_soal: String,
-    pub kategori_id: i32,
+    pub kategori_id: Option<i32>,
     pub is_premium: bool,
 }
 
