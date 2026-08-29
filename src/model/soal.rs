@@ -284,6 +284,10 @@ pub struct QuestionSearchRequest {
     pub page: Option<u32>,
     pub limit: Option<u32>,
     pub search: Option<String>,
+    /// Exact question id -- short-circuits every other filter. Used to jump
+    /// straight to one question (e.g. from a quality-check "edit manual"
+    /// link) instead of relying on a text search that can match duplicates.
+    pub id: Option<i32>,
     pub modul: Option<String>,
     pub pelajaran: Option<String>,
     pub tag: Option<String>,

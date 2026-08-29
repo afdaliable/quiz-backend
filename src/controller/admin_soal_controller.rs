@@ -79,7 +79,10 @@ async fn search_questions(
     let mut where_conditions = vec!["1=1"];
     let mut bind_values: Vec<String> = vec![];
 
-    if let Some(ref search) = query.search {
+    if let Some(id) = query.id {
+        where_conditions.push("s.id = ?");
+        bind_values.push(id.to_string());
+    } else if let Some(ref search) = query.search {
         if !search.is_empty() {
             where_conditions.push("s.soal LIKE ?");
             bind_values.push(format!("%{}%", search));
