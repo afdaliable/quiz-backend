@@ -799,7 +799,7 @@ impl AdminHierarchyDao {
             FROM topics t
             LEFT JOIN soal s ON s.topic_id = t.id
             GROUP BY t.id, t.name
-            ORDER BY (easy + medium + hard) ASC
+            ORDER BY COUNT(s.id) ASC
             LIMIT 30
         "#)
         .fetch_all(&*self.pool)
@@ -857,10 +857,10 @@ impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for RecentQuestion {
     fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(RecentQuestion {
-            id: row.get("id"),
-            soal_snippet: row.get("soal_snippet"),
-            status: row.get("status"),
-            track_id: row.get("track_id"),
+            id: row.try_get("id")?,
+            soal_snippet: row.try_get("soal_snippet")?,
+            status: row.try_get("status")?,
+            track_id: row.try_get("track_id")?,
             created_at: row.try_get("created_at").ok(),
         })
     }
@@ -878,10 +878,10 @@ impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for AnomalyQuestion {
     fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(AnomalyQuestion {
-            id: row.get("id"),
-            soal_snippet: row.get("soal_snippet"),
-            difficulty_est: row.get("difficulty_est"),
-            difficulty_calc: row.get("difficulty_calc"),
+            id: row.try_get("id")?,
+            soal_snippet: row.try_get("soal_snippet")?,
+            difficulty_est: row.try_get("difficulty_est")?,
+            difficulty_calc: row.try_get("difficulty_calc")?,
         })
     }
 }
