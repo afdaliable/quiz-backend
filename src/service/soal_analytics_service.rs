@@ -34,12 +34,12 @@ async fn fetch_counts(pool: &MySqlPool, column: &str) -> Result<HashMap<String, 
         SELECT
             {column} AS node_id,
             COUNT(*) AS total,
-            SUM(difficulty_est = 'easy') AS easy,
-            SUM(difficulty_est = 'medium') AS medium,
-            SUM(difficulty_est = 'hard') AS hard,
-            SUM(status = 'active') AS active,
-            SUM(status = 'draft') AS draft,
-            SUM(status = 'archived') AS archived
+            CAST(SUM(difficulty_est = 'easy') AS SIGNED) AS easy,
+            CAST(SUM(difficulty_est = 'medium') AS SIGNED) AS medium,
+            CAST(SUM(difficulty_est = 'hard') AS SIGNED) AS hard,
+            CAST(SUM(status = 'active') AS SIGNED) AS active,
+            CAST(SUM(status = 'draft') AS SIGNED) AS draft,
+            CAST(SUM(status = 'archived') AS SIGNED) AS archived
         FROM dbquizapp.soal
         WHERE {column} IS NOT NULL
         GROUP BY {column}
@@ -261,21 +261,32 @@ async fn compute_meta(pool: &MySqlPool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-pub async fn compute_and_store_summary(pool: &MySqlPool) {
+/// Returns Err with a short message on failure instead of silently
+/// swallowing it -- the background scheduled call just logs the Err (a
+/// stale summary table isn't a crash), but the manual recompute endpoint
+/// needs this to actually report failure to the caller instead of always
+/// saying "completed" regardless of what happened (confirmed live: this
+/// masked a real decode bug for a while -- recompute returned 200 while
+/// every table stayed empty).
+pub async fn compute_and_store_summary(pool: &MySqlPool) -> Result<(), String> {
     println!("[soal_analytics_service] Computing coverage...");
-    if let Err(e) = compute_coverage(pool).await {
-        eprintln!("[soal_analytics_service] compute_coverage failed: {:?}", e);
-        return;
-    }
+    compute_coverage(pool).await.map_err(|e| {
+        let msg = format!("compute_coverage failed: {:?}", e);
+        eprintln!("[soal_analytics_service] {}", msg);
+        msg
+    })?;
     println!("[soal_analytics_service] Computing tag variants...");
-    if let Err(e) = compute_tag_variants(pool).await {
-        eprintln!("[soal_analytics_service] compute_tag_variants failed: {:?}", e);
-        return;
-    }
+    compute_tag_variants(pool).await.map_err(|e| {
+        let msg = format!("compute_tag_variants failed: {:?}", e);
+        eprintln!("[soal_analytics_service] {}", msg);
+        msg
+    })?;
     println!("[soal_analytics_service] Computing meta...");
-    if let Err(e) = compute_meta(pool).await {
-        eprintln!("[soal_analytics_service] compute_meta failed: {:?}", e);
-        return;
-    }
+    compute_meta(pool).await.map_err(|e| {
+        let msg = format!("compute_meta failed: {:?}", e);
+        eprintln!("[soal_analytics_service] {}", msg);
+        msg
+    })?;
     println!("[soal_analytics_service] Done.");
+    Ok(())
 }

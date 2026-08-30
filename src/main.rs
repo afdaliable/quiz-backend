@@ -121,10 +121,13 @@ async fn main() -> std::io::Result<()> {
         let mut interval = time::interval(Duration::from_secs(24 * 3600));
         loop {
             interval.tick().await;
-            quiz_backend::service::soal_analytics_service::compute_and_store_summary(
+            if let Err(e) = quiz_backend::service::soal_analytics_service::compute_and_store_summary(
                 &app_state_analytics.context.soal.pool,
             )
-            .await;
+            .await
+            {
+                eprintln!("Daily soal analytics recompute failed: {}", e);
+            }
         }
     });
 

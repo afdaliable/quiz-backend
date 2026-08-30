@@ -793,9 +793,9 @@ impl AdminHierarchyDao {
 
         let coverage: Vec<CoverageEntry> = sqlx::query_as::<_, CoverageEntry>(r#"
             SELECT t.id as topic_id, t.name as topic_name,
-                SUM(CASE WHEN s.difficulty_est = 'easy' THEN 1 ELSE 0 END) as easy,
-                SUM(CASE WHEN s.difficulty_est = 'medium' THEN 1 ELSE 0 END) as medium,
-                SUM(CASE WHEN s.difficulty_est = 'hard' THEN 1 ELSE 0 END) as hard
+                CAST(SUM(CASE WHEN s.difficulty_est = 'easy' THEN 1 ELSE 0 END) AS SIGNED) as easy,
+                CAST(SUM(CASE WHEN s.difficulty_est = 'medium' THEN 1 ELSE 0 END) AS SIGNED) as medium,
+                CAST(SUM(CASE WHEN s.difficulty_est = 'hard' THEN 1 ELSE 0 END) AS SIGNED) as hard
             FROM topics t
             LEFT JOIN soal s ON s.topic_id = t.id
             GROUP BY t.id, t.name
@@ -899,11 +899,11 @@ impl<'c> sqlx::FromRow<'c, sqlx::mysql::MySqlRow> for CoverageEntry {
     fn from_row(row: &'c sqlx::mysql::MySqlRow) -> Result<Self, sqlx::Error> {
         use sqlx::Row;
         Ok(CoverageEntry {
-            topic_id: row.get("topic_id"),
-            topic_name: row.get("topic_name"),
-            easy: row.get("easy"),
-            medium: row.get("medium"),
-            hard: row.get("hard"),
+            topic_id: row.try_get("topic_id")?,
+            topic_name: row.try_get("topic_name")?,
+            easy: row.try_get("easy")?,
+            medium: row.try_get("medium")?,
+            hard: row.try_get("hard")?,
         })
     }
 }

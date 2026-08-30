@@ -202,8 +202,10 @@ async fn get_summary(data: web::Data<AppState<'_>>) -> impl Responder {
 /// pattern needed unlike the AI-backed endpoints elsewhere in this codebase.
 #[post("/recompute")]
 async fn recompute(data: web::Data<AppState<'_>>) -> impl Responder {
-    compute_and_store_summary(&data.context.soal.pool).await;
-    HttpResponse::Ok().json(serde_json::json!({"status": "completed"}))
+    match compute_and_store_summary(&data.context.soal.pool).await {
+        Ok(()) => HttpResponse::Ok().json(serde_json::json!({"status": "completed"})),
+        Err(msg) => HttpResponse::InternalServerError().json(err("recompute_failed", msg)),
+    }
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {
