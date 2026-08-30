@@ -299,13 +299,19 @@ async fn classify_and_save(
     }
 
     // ── Save ─────────────────────────────────────────────────────────────────
+    // `pelajaran` is the legacy free-text subject field, still read
+    // elsewhere in the app (search filter, dropdowns, display) -- live data
+    // shows it's always exactly the subcategory name (e.g. "Penalaran
+    // Verbal", "TIU (Tes Intelegensi Umum)"), so keep it in sync here
+    // instead of leaving it stuck empty after AI classification.
     sqlx::query(
-        "UPDATE dbquizapp.soal SET track_id=?, category_id=?, subcategory_id=?, topic_id=?, updated_at=NOW() WHERE id=?",
+        "UPDATE dbquizapp.soal SET track_id=?, category_id=?, subcategory_id=?, topic_id=?, pelajaran=?, updated_at=NOW() WHERE id=?",
     )
     .bind(&track_id)
     .bind(&category_id)
     .bind(&subcategory_id)
     .bind(&topic_id)
+    .bind(&subcategory_name)
     .bind(question_id)
     .execute(pool.as_ref())
     .await
