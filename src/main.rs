@@ -115,6 +115,19 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
+    // Background task: recompute soal coverage/tag-variant analytics daily
+    let app_state_analytics = app_state.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(24 * 3600));
+        loop {
+            interval.tick().await;
+            quiz_backend::service::soal_analytics_service::compute_and_store_summary(
+                &app_state_analytics.context.soal.pool,
+            )
+            .await;
+        }
+    });
+
     HttpServer::new(move || {
         let cors = Cors::default()
         .allow_any_origin()
@@ -156,6 +169,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_materi_generate_controller)
             .configure(controller::init_taxonomy_classify_controller)
             .configure(controller::init_soal_quality_controller)
+            .configure(controller::init_soal_analytics_controller)
             .configure(controller::init_internal_soal_controller)
             .configure(controller::init_question_comment_controller)
             .configure(controller::init_subscription_controller)
