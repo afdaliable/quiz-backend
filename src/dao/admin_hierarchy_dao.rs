@@ -766,7 +766,7 @@ impl AdminHierarchyDao {
         let by_category: Vec<(Option<String>, i64)> = sqlx::query_as::<_, (Option<String>, i64)>(r#"
             SELECT c.name, COUNT(s.id)
             FROM soal s
-            LEFT JOIN exam_categories c ON c.id = s.category_id
+            LEFT JOIN categories c ON c.id = s.category_id
             GROUP BY c.name
             ORDER BY COUNT(s.id) DESC
         "#)
@@ -796,7 +796,7 @@ impl AdminHierarchyDao {
                 SUM(CASE WHEN s.difficulty_est = 'easy' THEN 1 ELSE 0 END) as easy,
                 SUM(CASE WHEN s.difficulty_est = 'medium' THEN 1 ELSE 0 END) as medium,
                 SUM(CASE WHEN s.difficulty_est = 'hard' THEN 1 ELSE 0 END) as hard
-            FROM exam_topics t
+            FROM topics t
             LEFT JOIN soal s ON s.topic_id = t.id
             GROUP BY t.id, t.name
             ORDER BY (easy + medium + hard) ASC
