@@ -805,6 +805,15 @@ pub fn filter_clean_topics(tree: &TaxonomyTree, exclude_subcategory_id: &str) ->
 
 /// Ekstrak blok `{ ... }` terluar dari teks AI (strip markdown fences + leading text).
 fn extract_json_object(text: &str) -> &str {
+    // 9router occasionally prepends a UTF-8 BOM (U+FEFF) -- invisible in
+    // logs/terminal, but `str::trim()` does NOT strip it (BOM isn't
+    // Unicode whitespace). Left in place, "\u{FEFF}null" fails a bare
+    // `== "null"` string-equality shortcut while *looking* identical to
+    // "null" everywhere it gets printed. Confirmed live: this silently
+    // broke the bare-null short-circuit below (classify_topic's "no match"
+    // reply), producing "expected value at line 1 column 1" parse errors
+    // logged as "(raw: `null`)".
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     // 1. Strip markdown code fences: ```json ... ``` atau ``` ... ```
     let text = text.trim();
     let inner = if text.starts_with("```") {
@@ -833,6 +842,7 @@ fn extract_json_object(text: &str) -> &str {
 
 /// Ekstrak blok `[ ... ]` terluar dari teks AI (strip markdown fences + leading text).
 fn extract_json_array(text: &str) -> &str {
+    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
     let text = text.trim();
     let inner = if text.starts_with("```") {
         let after = if text.starts_with("```json") {
@@ -1060,6 +1070,21 @@ mod tests {
     fn test_extract_json_with_leading_text() {
         let text = "Berikut adalah jawaban:\n{\"solution\": \"x\", \"tag\": \"y\", \"modul\": \"\", \"pelajaran\": \"\"}";
         assert!(extract_json_object(text).starts_with('{'));
+    }
+
+    #[test]
+    fn test_extract_json_object_strips_leading_bom() {
+        // 9router occasionally prepends a UTF-8 BOM; `str::trim()` alone
+        // does not strip it, which broke classify_topic's bare-"null"
+        // shortcut (looked identical to plain "null" in every log line).
+        let text = "\u{FEFF}null";
+        assert_eq!(extract_json_object(text), "null");
+    }
+
+    #[test]
+    fn test_extract_json_array_strips_leading_bom() {
+        let text = "\u{FEFF}[\"a\", \"b\"]";
+        assert_eq!(extract_json_array(text), "[\"a\", \"b\"]");
     }
 
     // ── Test: build_prompt berisi soal & pilihan ──────────────────────────────
