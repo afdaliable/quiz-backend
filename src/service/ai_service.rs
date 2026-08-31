@@ -506,6 +506,89 @@ impl AiService {
             ))
         })
     }
+
+    /// Completes a batch of already-extracted raw soal blocks (e.g. OCR'd
+    /// text from a scanned latihan-soal doc) -- different job from
+    /// generate_soal: the question and options already exist as written,
+    /// AI only determines correct_answer and writes solution, it does NOT
+    /// invent new questions. `number` is the block's original numbering
+    /// label (echoed back by the AI so the caller can re-associate each
+    /// result with its source block/section for tagging, since the AI may
+    /// skip a block it can't make sense of).
+    pub async fn parse_soal_batch(&self, blocks: &[(String, String)]) -> Result<Vec<ParsedSoal>, AiError> {
+        let (system, user) = Self::build_parse_prompt(blocks);
+        let max_tokens = self.max_tokens.max(600 * blocks.len().max(1) as u32);
+
+        match self.primary.complete(&system, &user, max_tokens).await {
+            Ok((text, _, _)) => Self::parse_parsed_soal(&text),
+            Err(primary_err) => match &self.fallback {
+                Some(fallback) => match fallback.complete(&system, &user, max_tokens).await {
+                    Ok((text, _, _)) => Self::parse_parsed_soal(&text),
+                    Err(fallback_err) => Err(AiError::BothProvidersFailed(format!(
+                        "primary: {}, fallback: {}",
+                        primary_err, fallback_err
+                    ))),
+                },
+                None => Err(primary_err),
+            },
+        }
+    }
+
+    fn build_parse_prompt(blocks: &[(String, String)]) -> (String, String) {
+        let system = "Kamu asisten pembersih data soal ujian pilihan ganda berbahasa Indonesia. \
+            Kamu akan diberi beberapa blok teks mentah hasil OCR/salin-tempel dari dokumen latihan \
+            soal -- tiap blok SUDAH berisi pertanyaan dan 5 pilihan jawaban (a-e) yang lengkap. \
+            Tugasmu BUKAN membuat soal baru dan BUKAN mengubah makna pertanyaan/pilihan -- rapikan \
+            saja typo/spasi/artefak OCR yang jelas keliru, lalu: (1) tentukan jawaban yang benar, \
+            (2) tulis penjelasan singkat kenapa jawaban itu benar. Kalau sebuah blok rusak parah \
+            (bukan soal pilihan ganda, cuma placeholder gambar, atau opsinya gak lengkap), JANGAN \
+            dipaksakan -- lewati saja blok itu, jangan dimasukkan ke hasil.\n\n\
+            Balas HANYA sebagai array JSON, satu objek per blok yang berhasil diproses (blok yang \
+            dilewati tidak usah dimasukkan). Jangan menjelaskan proses berpikirmu, jangan menyapa, \
+            jangan membungkus dengan markdown code fence. Karakter pertama balasanmu harus '[' dan \
+            karakter terakhir harus ']'.\n\n\
+            Contoh format satu item (\"number\" harus sama persis dengan label nomor blok input):\n\
+            {\"number\": \"3\", \"soal\": \"...\", \"opt1\": \"...\", \"opt2\": \"...\", \"opt3\": \"...\", \"opt4\": \"...\", \"opt5\": \"...\", \"correct_answer\": \"opt2\", \"solution\": \"Penjelasan singkat.\"}"
+            .to_string();
+
+        let mut blocks_text = String::new();
+        for (number, raw) in blocks {
+            blocks_text.push_str(&format!("=== Blok {number} ===\n{raw}\n\n"));
+        }
+        let user = format!(
+            "Berikut {n} blok soal mentah. Proses tiap blok sesuai instruksi di atas:\n\n{blocks_text}",
+            n = blocks.len(),
+        );
+
+        (system, user)
+    }
+
+    fn parse_parsed_soal(text: &str) -> Result<Vec<ParsedSoal>, AiError> {
+        let extracted = extract_json_array(text);
+        serde_json::from_str::<Vec<ParsedSoal>>(extracted).map_err(|e| {
+            AiError::ParseError(format!(
+                "Invalid JSON array from AI: {} (raw snippet: {})",
+                e,
+                &text[..text.len().min(500)]
+            ))
+        })
+    }
+}
+
+/// One soal fully completed from a raw extracted-text block -- see
+/// AiService::parse_soal_batch. `number` lets the caller map back to the
+/// source block (and its detected section header) for tagging.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParsedSoal {
+    pub number: String,
+    pub soal: String,
+    pub opt1: String,
+    pub opt2: String,
+    pub opt3: String,
+    pub opt4: String,
+    pub opt5: String,
+    pub correct_answer: String,
+    pub solution: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
