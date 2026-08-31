@@ -164,37 +164,82 @@ impl TaxonomyDao {
         TaxonomyContext { track, category, subcategory, topic, tags }
     }
 
+    /// Was N+1: 1 query for tracks, then one more per track for its
+    /// categories, one more per category for its subcategories, one more
+    /// per subcategory for its topics -- 147 sequential round-trips for the
+    /// live tree shape (10 tracks, 19 categories, 117 subcategories, 1330
+    /// topics). Fine for one interactive click; under the bulk-classify
+    /// sweep's concurrency (each classify call fetches this tree once) it
+    /// multiplied into ~1470 queries fighting over the connection pool and
+    /// took down unrelated endpoints with PoolTimedOut. Four flat queries
+    /// plus in-memory grouping instead.
     pub async fn get_taxonomy_tree(&self) -> Result<TaxonomyTree, sqlx::Error> {
-        let tracks = self.get_all_tracks().await?;
-        let mut tree_tracks = Vec::new();
+        let all_tracks = self.get_all_tracks().await?;
 
-        for track in tracks {
-            let categories = self.get_categories_by_track_slug(&track.slug).await?;
-            let mut cat_children = Vec::new();
+        let all_categories = sqlx::query_as::<_, Category>(
+            r#"
+            SELECT c.id, c.track_id, c.slug, c.name, c.sort_order,
+                   COUNT(s.id) AS question_count
+            FROM categories c
+            LEFT JOIN soal s ON s.category_id = c.id
+            GROUP BY c.id, c.track_id, c.slug, c.name, c.sort_order
+            ORDER BY c.sort_order
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await?;
 
-            for cat in categories {
-                let subcats = self.get_subcategories_by_category_slug(&cat.slug).await?;
-                let mut subcat_children = Vec::new();
+        let all_subcategories = sqlx::query_as::<_, Subcategory>(
+            r#"
+            SELECT sc.id, sc.category_id, sc.slug, sc.name, sc.sort_order,
+                   COUNT(s.id) AS question_count
+            FROM subcategories sc
+            LEFT JOIN soal s ON s.subcategory_id = sc.id
+            GROUP BY sc.id, sc.category_id, sc.slug, sc.name, sc.sort_order
+            ORDER BY sc.sort_order
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await?;
 
-                for sub in subcats {
-                    let topics = self.get_topics_by_subcategory_slug(&sub.slug).await?;
-                    subcat_children.push(SubcategoryWithChildren {
-                        subcategory: sub,
-                        topics,
-                    });
-                }
+        let all_topics = sqlx::query_as::<_, Topic>(
+            r#"
+            SELECT tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order,
+                   COUNT(s.id) AS question_count
+            FROM topics tp
+            LEFT JOIN soal s ON s.topic_id = tp.id
+            GROUP BY tp.id, tp.subcategory_id, tp.slug, tp.name, tp.sort_order
+            ORDER BY tp.sort_order
+            "#,
+        )
+        .fetch_all(&*self.pool)
+        .await?;
 
-                cat_children.push(CategoryWithChildren {
-                    category: cat,
-                    subcategories: subcat_children,
-                });
-            }
-
-            tree_tracks.push(TrackWithChildren {
-                track,
-                categories: cat_children,
-            });
-        }
+        let tree_tracks = all_tracks
+            .into_iter()
+            .map(|track| {
+                let categories = all_categories
+                    .iter()
+                    .filter(|c| c.track_id == track.id)
+                    .map(|cat| {
+                        let subcategories = all_subcategories
+                            .iter()
+                            .filter(|s| s.category_id == cat.id)
+                            .map(|sub| {
+                                let topics = all_topics
+                                    .iter()
+                                    .filter(|t| t.subcategory_id == sub.id)
+                                    .cloned()
+                                    .collect();
+                                SubcategoryWithChildren { subcategory: sub.clone(), topics }
+                            })
+                            .collect();
+                        CategoryWithChildren { category: cat.clone(), subcategories }
+                    })
+                    .collect();
+                TrackWithChildren { track, categories }
+            })
+            .collect();
 
         Ok(TaxonomyTree { tracks: tree_tracks })
     }
