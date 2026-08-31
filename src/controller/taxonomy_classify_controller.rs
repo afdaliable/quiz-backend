@@ -385,10 +385,277 @@ async fn get_classify_job(path: web::Path<String>, data: web::Data<AppState<'_>>
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2 of the soal analytics work: bulk retroactive classify sweep.
+//
+// Each item is 3 sequential AI calls via classify_and_save. A strictly
+// one-at-a-time loop (the ai_bulk_jobs / bulk-enrich pattern) would take on
+// the order of a week+ for the ~20k currently-uncategorized soal. This runs
+// a bounded number of items concurrently instead -- 9router already showed
+// it handles overlapping requests fine (observed live during earlier
+// debugging), and there's no per-admin rate limit concern here since this
+// isn't interactive traffic.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct BulkClassifyRequest {
+    /// "uncategorized" (default) = every soal with no track_id or no
+    /// subcategory_id. "ids" = the explicit list in question_ids.
+    #[serde(default = "default_mode")]
+    mode: String,
+    #[serde(default)]
+    question_ids: Vec<i64>,
+    /// How many soal to classify at once. Default 10.
+    concurrency: Option<u32>,
+}
+
+fn default_mode() -> String {
+    "uncategorized".to_string()
+}
+
+#[derive(Serialize)]
+struct BulkClassifyAcceptedResponse {
+    job_id: String,
+    status: String,
+    total: i64,
+    poll_url: String,
+}
+
+#[derive(Serialize)]
+struct BulkClassifyStatusResponse {
+    job_id: String,
+    status: String,
+    total: i32,
+    processed: i32,
+    succeeded: i32,
+    failed: i32,
+    started_at: Option<String>,
+    completed_at: Option<String>,
+}
+
+/// POST /admin/classify/bulk
+#[post("/bulk")]
+async fn start_bulk_classify(
+    body: web::Json<BulkClassifyRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: HttpRequest,
+) -> impl Responder {
+    let ai_service = match &data.ai_service {
+        Some(svc) => Arc::clone(svc),
+        None => {
+            return HttpResponse::ServiceUnavailable()
+                .json(err("ai_service_unavailable", "AI service is not configured on this server."))
+        }
+    };
+    let pool = Arc::clone(&data.context.soal.pool);
+    let admin_email = extract_admin_email(&http_req);
+    let concurrency = body.concurrency.unwrap_or(10).clamp(1, 30);
+
+    let question_ids: Vec<i64> = if body.mode == "ids" {
+        body.question_ids.clone()
+    } else {
+        match sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM dbquizapp.soal WHERE track_id IS NULL OR subcategory_id IS NULL",
+        )
+        .fetch_all(&*pool)
+        .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!("[taxonomy_classify_controller] Failed to resolve uncategorized ids: {:?}", e);
+                return HttpResponse::InternalServerError()
+                    .json(err("db_error", "Failed to resolve target questions."));
+            }
+        }
+    };
+
+    if question_ids.is_empty() {
+        return HttpResponse::BadRequest().json(err("bad_request", "No questions matched the given criteria."));
+    }
+
+    let job_id = Uuid::new_v4().to_string();
+    let total = question_ids.len() as i64;
+    if let Err(e) = sqlx::query(
+        r#"
+        INSERT INTO dbquizapp.taxonomy_classify_bulk_jobs (id, status, mode, total, concurrency, created_by)
+        VALUES (?, 'pending', ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&job_id)
+    .bind(&body.mode)
+    .bind(total)
+    .bind(concurrency)
+    .bind(&admin_email)
+    .execute(&*pool)
+    .await
+    {
+        eprintln!("[taxonomy_classify_controller] Failed to insert bulk job: {:?}", e);
+        return HttpResponse::InternalServerError().json(err("db_error", "Failed to create job."));
+    }
+
+    let job_id_clone = job_id.clone();
+    tokio::spawn(async move {
+        run_bulk_classify_job(job_id_clone, question_ids, concurrency as usize, pool, ai_service).await;
+    });
+
+    HttpResponse::Accepted().json(BulkClassifyAcceptedResponse {
+        poll_url: format!("/admin/classify/bulk/{}", job_id),
+        job_id,
+        status: "pending".to_string(),
+        total,
+    })
+}
+
+async fn run_bulk_classify_job(
+    job_id: String,
+    question_ids: Vec<i64>,
+    concurrency: usize,
+    pool: Arc<MySqlPool>,
+    ai_service: Arc<AiService>,
+) {
+    let _ = sqlx::query(
+        "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='running', started_at=NOW() WHERE id=?",
+    )
+    .bind(&job_id)
+    .execute(&*pool)
+    .await;
+
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(concurrency));
+    let mut handles = Vec::with_capacity(question_ids.len());
+
+    for qid in question_ids {
+        // Cancellation check before spawning each item -- already-running
+        // items finish naturally, nothing new gets queued after this.
+        let status: Option<String> = sqlx::query_scalar(
+            "SELECT status FROM dbquizapp.taxonomy_classify_bulk_jobs WHERE id=?",
+        )
+        .bind(&job_id)
+        .fetch_optional(&*pool)
+        .await
+        .unwrap_or(None);
+        if status.as_deref() == Some("cancelled") {
+            break;
+        }
+
+        let permit = semaphore.clone().acquire_owned().await.expect("semaphore closed");
+        let pool = pool.clone();
+        let ai_service = ai_service.clone();
+        let job_id_task = job_id.clone();
+
+        handles.push(tokio::spawn(async move {
+            let _permit = permit;
+            let outcome = classify_and_save(qid, &pool, &ai_service).await;
+            let succeeded = outcome.is_ok();
+            if let Err(e) = &outcome {
+                eprintln!("[taxonomy_classify_controller] bulk classify failed for soal {}: {}", qid, e);
+            }
+            let (succ_inc, fail_inc) = if succeeded { (1, 0) } else { (0, 1) };
+            let _ = sqlx::query(
+                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET processed=processed+1, succeeded=succeeded+?, failed=failed+? WHERE id=?",
+            )
+            .bind(succ_inc)
+            .bind(fail_inc)
+            .bind(&job_id_task)
+            .execute(&*pool)
+            .await;
+        }));
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let final_status: Option<String> =
+        sqlx::query_scalar("SELECT status FROM dbquizapp.taxonomy_classify_bulk_jobs WHERE id=?")
+            .bind(&job_id)
+            .fetch_optional(&*pool)
+            .await
+            .unwrap_or(None);
+    if final_status.as_deref() != Some("cancelled") {
+        let _ = sqlx::query(
+            "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='completed', completed_at=NOW() WHERE id=?",
+        )
+        .bind(&job_id)
+        .execute(&*pool)
+        .await;
+    }
+}
+
+/// GET /admin/classify/bulk/{job_id}
+#[get("/bulk/{job_id}")]
+async fn get_bulk_classify_job(path: web::Path<String>, data: web::Data<AppState<'_>>) -> impl Responder {
+    let job_id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    #[derive(sqlx::FromRow)]
+    struct JobRow {
+        status: String,
+        total: i32,
+        processed: i32,
+        succeeded: i32,
+        failed: i32,
+        started_at: Option<chrono::DateTime<chrono::Utc>>,
+        completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    }
+
+    let job: JobRow = match sqlx::query_as::<_, JobRow>(
+        "SELECT status, total, processed, succeeded, failed, started_at, completed_at FROM dbquizapp.taxonomy_classify_bulk_jobs WHERE id = ?",
+    )
+    .bind(&job_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(j)) => j,
+        Ok(None) => return HttpResponse::NotFound().json(err("not_found", format!("Job {} not found", job_id))),
+        Err(e) => {
+            eprintln!("[taxonomy_classify_controller] DB error fetching bulk job {}: {:?}", job_id, e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to fetch job status."));
+        }
+    };
+
+    HttpResponse::Ok().json(BulkClassifyStatusResponse {
+        job_id,
+        status: job.status,
+        total: job.total,
+        processed: job.processed,
+        succeeded: job.succeeded,
+        failed: job.failed,
+        started_at: job.started_at.map(|t| t.to_rfc3339()),
+        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+    })
+}
+
+/// DELETE /admin/classify/bulk/{job_id} -- cancel a pending/running sweep.
+#[actix_web::delete("/bulk/{job_id}")]
+async fn cancel_bulk_classify_job(path: web::Path<String>, data: web::Data<AppState<'_>>) -> impl Responder {
+    let job_id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    match sqlx::query(
+        "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='cancelled' WHERE id=? AND status IN ('pending','running')",
+    )
+    .bind(&job_id)
+    .execute(pool)
+    .await
+    {
+        Ok(result) if result.rows_affected() > 0 => {
+            HttpResponse::Ok().json(serde_json::json!({"status": "cancelled"}))
+        }
+        Ok(_) => HttpResponse::BadRequest().json(err("not_cancellable", "Job not found or already finished.")),
+        Err(e) => {
+            eprintln!("[taxonomy_classify_controller] Failed to cancel bulk job {}: {:?}", job_id, e);
+            HttpResponse::InternalServerError().json(err("db_error", "Failed to cancel job."))
+        }
+    }
+}
+
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/classify")
             .wrap(AdminMiddleware::new())
+            .service(start_bulk_classify)
+            .service(get_bulk_classify_job)
+            .service(cancel_bulk_classify_job)
             .service(start_classify)
             .service(get_classify_job),
     );
