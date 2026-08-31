@@ -93,6 +93,21 @@ async fn main() -> std::io::Result<()> {
         .map_err(|e| std::io::Error::new(e.kind(), format!("Failed to create soal-images upload directory '{}': {}", soal_images_dir, e)))?;
     println!("Upload directory: {}", soal_images_dir);
 
+    // One-shot: resume any bulk classify sweep left in status='running' by a
+    // previous process instance that got killed mid-flight (CI/CD
+    // auto-redeploy kills the tokio task, not the DB job row). See
+    // taxonomy_classify_controller::resume_orphaned_bulk_classify_jobs.
+    {
+        let pool = app_state.context.soal.pool.clone();
+        let ai_service = app_state.ai_service.clone();
+        tokio::spawn(async move {
+            quiz_backend::controller::taxonomy_classify_controller::resume_orphaned_bulk_classify_jobs(
+                pool, ai_service,
+            )
+            .await;
+        });
+    }
+
     // Background task: clean up expired sessions every hour
     let app_state_clone = app_state.clone();
     tokio::spawn(async move {

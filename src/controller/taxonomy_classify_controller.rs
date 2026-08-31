@@ -649,6 +649,108 @@ async fn cancel_bulk_classify_job(path: web::Path<String>, data: web::Data<AppSt
     }
 }
 
+/// Called once at process startup. A bulk classify job left in
+/// status='running' belonged to a process that got killed mid-flight (e.g.
+/// CI/CD auto-redeploy) -- the `tokio::spawn`ed worker dies with it, but
+/// the job row survives. For mode='uncategorized' this is trivially
+/// resumable: re-running the same "no track/subcategory" query naturally
+/// excludes whatever already got classified before the crash, so this
+/// just continues from wherever it left off instead of restarting from
+/// zero. mode='ids' jobs don't persist their target id list, so those
+/// can't be safely resumed and are marked failed instead.
+pub async fn resume_orphaned_bulk_classify_jobs(pool: Arc<MySqlPool>, ai_service: Option<Arc<AiService>>) {
+    #[derive(sqlx::FromRow)]
+    struct OrphanedJob {
+        id: String,
+        mode: String,
+        concurrency: i32,
+    }
+
+    let orphaned: Vec<OrphanedJob> = match sqlx::query_as::<_, OrphanedJob>(
+        "SELECT id, mode, concurrency FROM dbquizapp.taxonomy_classify_bulk_jobs WHERE status='running'",
+    )
+    .fetch_all(&*pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("[taxonomy_classify_controller] Failed to check for orphaned bulk jobs: {:?}", e);
+            return;
+        }
+    };
+    if orphaned.is_empty() {
+        return;
+    }
+
+    for job in orphaned {
+        if job.mode != "uncategorized" {
+            eprintln!(
+                "[taxonomy_classify_controller] Orphaned bulk job {} (mode={}) can't be auto-resumed, marking failed.",
+                job.id, job.mode
+            );
+            let _ = sqlx::query(
+                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='failed', error_message='orphaned by process restart, mode!=uncategorized jobs are not auto-resumed', completed_at=NOW() WHERE id=?",
+            )
+            .bind(&job.id)
+            .execute(&*pool)
+            .await;
+            continue;
+        }
+
+        let Some(ai_service) = ai_service.clone() else {
+            eprintln!(
+                "[taxonomy_classify_controller] Orphaned bulk job {} found but AI service unavailable, marking failed.",
+                job.id
+            );
+            let _ = sqlx::query(
+                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='failed', error_message='orphaned by process restart, AI service unavailable on resume', completed_at=NOW() WHERE id=?",
+            )
+            .bind(&job.id)
+            .execute(&*pool)
+            .await;
+            continue;
+        };
+
+        let remaining_ids: Vec<i64> = match sqlx::query_scalar(
+            "SELECT id FROM dbquizapp.soal WHERE track_id IS NULL OR subcategory_id IS NULL",
+        )
+        .fetch_all(&*pool)
+        .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                eprintln!(
+                    "[taxonomy_classify_controller] Failed to resolve remaining ids for orphaned job {}: {:?}",
+                    job.id, e
+                );
+                continue;
+            }
+        };
+
+        if remaining_ids.is_empty() {
+            let _ = sqlx::query(
+                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='completed', completed_at=NOW() WHERE id=?",
+            )
+            .bind(&job.id)
+            .execute(&*pool)
+            .await;
+            continue;
+        }
+
+        println!(
+            "[taxonomy_classify_controller] Resuming orphaned bulk job {} -- {} soal still uncategorized.",
+            job.id,
+            remaining_ids.len()
+        );
+        let pool_clone = pool.clone();
+        let job_id = job.id.clone();
+        let concurrency = job.concurrency.max(1) as usize;
+        tokio::spawn(async move {
+            run_bulk_classify_job(job_id, remaining_ids, concurrency, pool_clone, ai_service).await;
+        });
+    }
+}
+
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/classify")
