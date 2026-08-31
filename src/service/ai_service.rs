@@ -618,6 +618,16 @@ impl AiService {
             topic_slug: Option<String>,
         }
         let extracted = extract_json_object(&text);
+        // The prompt explicitly allows a bare `null` reply for "no topic
+        // fits" -- extract_json_object finds no {...} in that case and
+        // passes "null" straight through, which fails to deserialize into
+        // Resp (a JSON null isn't a struct). Confirmed live: this was a
+        // near-100% failure rate on the bulk classify sweep, since "no
+        // specific topic fits" is common across a diverse uncategorized
+        // corpus. Handle it before attempting the struct parse.
+        if extracted.trim().eq_ignore_ascii_case("null") {
+            return Ok(None);
+        }
         let parsed: Resp = serde_json::from_str(extracted).map_err(|e| {
             AiError::ParseError(format!(
                 "Invalid JSON from AI (stage 2 - topic): {} (raw: {})",
