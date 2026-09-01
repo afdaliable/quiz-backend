@@ -42,6 +42,25 @@ pub fn init(cfg: &mut web::ServiceConfig) {
     );
 }
 
+/// Turns free-typed search text into a MySQL FULLTEXT BOOLEAN MODE query:
+/// each whitespace-separated token becomes `+token*` (required, prefix
+/// match), stripped of anything but alphanumerics so user input can't
+/// inject boolean-mode operators (+-><()~*"@). Returns None for empty/
+/// punctuation-only input, which the caller treats as "no search filter".
+fn build_fulltext_boolean_query(search: &str) -> Option<String> {
+    let cleaned: Vec<String> = search
+        .split_whitespace()
+        .map(|tok| tok.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .filter(|tok| !tok.is_empty())
+        .map(|tok| format!("+{}*", tok))
+        .collect();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned.join(" "))
+    }
+}
+
 /// Search questions with pagination and filtering
 #[utoipa::path(
     get,
@@ -83,9 +102,14 @@ async fn search_questions(
         where_conditions.push("s.id = ?");
         bind_values.push(id.to_string());
     } else if let Some(ref search) = query.search {
-        if !search.is_empty() {
-            where_conditions.push("s.soal LIKE ?");
-            bind_values.push(format!("%{}%", search));
+        // Was `s.soal LIKE '%term%'` -- a leading wildcard defeats any
+        // index, forcing a full scan of the soal table on every search
+        // (confirmed live: 15s+ per request). `ft_soal_text` FULLTEXT
+        // index + BOOLEAN MODE with a trailing `*` gives the same
+        // prefix-as-you-type matching through the index instead.
+        if let Some(boolean_query) = build_fulltext_boolean_query(search) {
+            where_conditions.push("MATCH(s.soal) AGAINST (? IN BOOLEAN MODE)");
+            bind_values.push(boolean_query);
         }
     }
 
@@ -1224,6 +1248,35 @@ async fn get_soal_packages(
 
 #[cfg(test)]
 mod tests {
+    use super::build_fulltext_boolean_query;
+
+    #[test]
+    fn test_fulltext_query_single_token_prefix() {
+        assert_eq!(build_fulltext_boolean_query("panca"), Some("+panca*".to_string()));
+    }
+
+    #[test]
+    fn test_fulltext_query_multi_token_requires_all() {
+        assert_eq!(
+            build_fulltext_boolean_query("budi pekerti"),
+            Some("+budi* +pekerti*".to_string())
+        );
+    }
+
+    #[test]
+    fn test_fulltext_query_strips_boolean_operators() {
+        // User input shouldn't be able to inject FULLTEXT BOOLEAN MODE
+        // syntax (+-><()~*"@) -- only alphanumerics survive per token.
+        assert_eq!(build_fulltext_boolean_query("+panca* -foo\""), Some("+panca* +foo*".to_string()));
+    }
+
+    #[test]
+    fn test_fulltext_query_empty_input() {
+        assert_eq!(build_fulltext_boolean_query(""), None);
+        assert_eq!(build_fulltext_boolean_query("   "), None);
+        assert_eq!(build_fulltext_boolean_query("***"), None);
+    }
+
     #[test]
     fn test_image_ext_mapping() {
         let cases = vec![
