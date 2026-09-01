@@ -514,7 +514,7 @@ async fn run_bulk_classify_job(
     ai_service: Arc<AiService>,
 ) {
     let _ = sqlx::query(
-        "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='running', started_at=NOW() WHERE id=?",
+        "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET status='running', started_at=NOW(), heartbeat_at=NOW() WHERE id=?",
     )
     .bind(&job_id)
     .execute(&*pool)
@@ -551,7 +551,7 @@ async fn run_bulk_classify_job(
             }
             let (succ_inc, fail_inc) = if succeeded { (1, 0) } else { (0, 1) };
             let _ = sqlx::query(
-                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET processed=processed+1, succeeded=succeeded+?, failed=failed+? WHERE id=?",
+                "UPDATE dbquizapp.taxonomy_classify_bulk_jobs SET processed=processed+1, succeeded=succeeded+?, failed=failed+?, heartbeat_at=NOW() WHERE id=?",
             )
             .bind(succ_inc)
             .bind(fail_inc)
@@ -710,6 +710,42 @@ pub async fn resume_orphaned_bulk_classify_jobs(pool: Arc<MySqlPool>, ai_service
             .await;
             continue;
         };
+
+        // NAS and PC run this same startup check independently against
+        // the same DB -- confirmed live, both resumed the same job at
+        // once and doubled AI load. Claim atomically first: only proceed
+        // if this UPDATE actually affects a row, i.e. the job's heartbeat
+        // is stale (nothing else is actively ticking it right now).
+        // InnoDB serializes concurrent UPDATEs to the same row, so only
+        // one instance's claim can win when both race for it.
+        let hostname = std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string());
+        let claimed = match sqlx::query(
+            "UPDATE dbquizapp.taxonomy_classify_bulk_jobs \
+             SET worker_hostname=?, heartbeat_at=NOW() \
+             WHERE id=? AND status='running' \
+               AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - INTERVAL 2 MINUTE)",
+        )
+        .bind(&hostname)
+        .bind(&job.id)
+        .execute(&*pool)
+        .await
+        {
+            Ok(res) => res.rows_affected() > 0,
+            Err(e) => {
+                eprintln!(
+                    "[taxonomy_classify_controller] Failed to claim orphaned bulk job {}: {:?}",
+                    job.id, e
+                );
+                false
+            }
+        };
+        if !claimed {
+            println!(
+                "[taxonomy_classify_controller] Orphaned bulk job {} has a fresh heartbeat -- another instance is already working it, skipping.",
+                job.id
+            );
+            continue;
+        }
 
         let remaining_ids: Vec<i64> = match sqlx::query_scalar(
             "SELECT id FROM dbquizapp.soal WHERE track_id IS NULL OR subcategory_id IS NULL",
