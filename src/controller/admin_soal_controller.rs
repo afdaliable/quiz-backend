@@ -184,6 +184,13 @@ async fn search_questions(
             where_conditions.push("(s.solution IS NULL OR s.solution = '')");
         }
     }
+    if let Some(has_tag) = query.has_tag {
+        if has_tag {
+            where_conditions.push("s.tag IS NOT NULL AND s.tag != ''");
+        } else {
+            where_conditions.push("(s.tag IS NULL OR s.tag = '')");
+        }
+    }
 
     let where_clause = where_conditions.join(" AND ");
 

@@ -309,6 +309,8 @@ pub struct QuestionSearchRequest {
     pub has_answer: Option<bool>,
     /// true = only questions with a solution set; false = only without
     pub has_solution: Option<bool>,
+    /// true = only questions with a tag set; false = only without
+    pub has_tag: Option<bool>,
 }
 
 /// Paginated questions response
