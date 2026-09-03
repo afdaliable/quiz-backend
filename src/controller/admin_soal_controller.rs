@@ -48,9 +48,16 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 /// inject boolean-mode operators (+-><()~*"@). Returns None for empty/
 /// punctuation-only input, which the caller treats as "no search filter".
 fn build_fulltext_boolean_query(search: &str) -> Option<String> {
+    // Split on ANY non-alphanumeric char, not just whitespace -- MySQL's
+    // FULLTEXT parser treats hyphens/punctuation as word boundaries too
+    // (indexes "Unsur-unsur" as two words: "unsur", "unsur"). The old
+    // version only split on whitespace, then stripped punctuation WITHIN
+    // each token instead of splitting on it -- "Unsur-unsur" glued into
+    // "Unsurunsur", a token that was never indexed, so the query silently
+    // matched nothing. Confirmed live: a real soal's exact opening phrase
+    // returned zero search results because of this.
     let cleaned: Vec<String> = search
-        .split_whitespace()
-        .map(|tok| tok.chars().filter(|c| c.is_alphanumeric()).collect::<String>())
+        .split(|c: char| !c.is_alphanumeric())
         .filter(|tok| !tok.is_empty())
         .map(|tok| format!("+{}*", tok))
         .collect();
@@ -1282,6 +1289,18 @@ mod tests {
         assert_eq!(build_fulltext_boolean_query(""), None);
         assert_eq!(build_fulltext_boolean_query("   "), None);
         assert_eq!(build_fulltext_boolean_query("***"), None);
+    }
+
+    #[test]
+    fn test_fulltext_query_splits_hyphenated_words() {
+        // MySQL's FULLTEXT parser indexes "Unsur-unsur" as two separate
+        // words ("unsur", "unsur"), not one glued token -- confirmed
+        // live, a real soal starting with this exact phrase returned zero
+        // results before this fix.
+        assert_eq!(
+            build_fulltext_boolean_query("Unsur-unsur penting"),
+            Some("+Unsur* +unsur* +penting*".to_string())
+        );
     }
 
     #[test]
