@@ -27,6 +27,7 @@ pub mod materi_parse_controller;
 pub mod taxonomy_classify_controller;
 pub mod soal_quality_controller;
 pub mod admin_soal_analytics_controller;
+pub mod materi_library_controller;
 
 // Internal endpoints (IP + API key restricted, no OAuth)
 pub mod internal_soal_controller;
@@ -74,6 +75,7 @@ pub use materi_parse_controller::init as init_materi_parse_controller;
 pub use taxonomy_classify_controller::init as init_taxonomy_classify_controller;
 pub use soal_quality_controller::init as init_soal_quality_controller;
 pub use admin_soal_analytics_controller::init as init_soal_analytics_controller;
+pub use materi_library_controller::init as init_materi_library_controller;
 
 // Internal endpoint exports
 pub use internal_soal_controller::init as init_internal_soal_controller;

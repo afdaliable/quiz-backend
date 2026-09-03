@@ -627,7 +627,14 @@ async fn enrich_single_for_job(
         _ => return false,
     };
 
-    let ctx = build_soal_context(&soal, fields.to_vec());
+    let materi_context = crate::controller::materi_library_controller::get_materi_context_for_soal(
+        pool,
+        soal.subcategory_id.as_deref(),
+        soal.topic_id.as_deref(),
+    )
+    .await;
+
+    let ctx = build_soal_context(&soal, fields.to_vec(), materi_context);
 
     let enriched = match ai_service.enrich_question(&ctx).await {
         Ok(e) => e,
@@ -999,7 +1006,7 @@ fn resolve_fields(requested: &[String]) -> Vec<String> {
     }
 }
 
-fn build_soal_context(soal: &AdminSoal, fields: Vec<String>) -> SoalContext {
+fn build_soal_context(soal: &AdminSoal, fields: Vec<String>, materi_context: Option<String>) -> SoalContext {
     SoalContext {
         id: soal.id as i64,
         soal: soal.soal.clone(),
@@ -1010,6 +1017,7 @@ fn build_soal_context(soal: &AdminSoal, fields: Vec<String>) -> SoalContext {
         opt5: soal.opt5.clone(),
         correct_answer: soal.correct_answer.clone(),
         fields_to_enrich: fields,
+        materi_context,
     }
 }
 

@@ -52,6 +52,12 @@ pub struct SoalContext {
     pub correct_answer: Option<String>,
     /// Field mana yang diminta: ["solution", "tag", "modul", "pelajaran"]
     pub fields_to_enrich: Vec<String>,
+    /// Materi referensi dari materi_library (RAG grounding), kalau ada
+    /// yang cocok dengan subcategory_id/topic_id soal ini. Tanpa ini, AI
+    /// cuma jawab dari pengetahuan umumnya -- generik dan bisa salah di
+    /// soal yang butuh sumber spesifik (mis. rumusan resmi dari suatu
+    /// modul pelatihan).
+    pub materi_context: Option<String>,
 }
 
 /// Satu soal hasil generate AI dari teks materi -- draft, belum disimpan.
@@ -367,13 +373,23 @@ impl AiService {
         } else {
             "{\"solution\": \"2 + 2 = 4 karena penjumlahan dua bilangan cacah.\", \"tag\": \"matematika-dasar\", \"modul\": \"Operasi Hitung\", \"pelajaran\": \"Matematika\"}"
         };
+        let grounding_instruction = if soal.materi_context.is_some() {
+            " Soal ini dilengkapi kutipan MATERI REFERENSI resmi -- kutipan itu adalah \
+            sumber kebenaran utama, prioritaskan dia di atas pengetahuan umummu kalau ada \
+            beda. Kalau materi referensi menyebutkan istilah/rumusan spesifik yang beda \
+            tipis dari opsi jawaban di soal (mis. kata yang diganti sinonimnya), itu \
+            biasanya pengecoh yang sengaja dibuat -- perhatikan baik-baik."
+        } else {
+            ""
+        };
         let system = format!(
             "Kamu adalah asisten pendidikan yang menganalisis soal ujian berbagai \
             topik ujian dengan bahasa Indonesia. Tugasmu HANYA mengembalikan satu objek JSON \
             berisi penjelasan dan metadata soal -- jangan menjelaskan proses berpikirmu, \
             jangan menyapa, jangan membungkus dengan markdown code fence, jangan menulis apa \
             pun sebelum atau sesudah objek JSON itu. Balasanmu akan di-parse langsung sebagai \
-            JSON, jadi karakter pertama balasanmu harus '{{' dan karakter terakhir harus '}}'.\n\n\
+            JSON, jadi karakter pertama balasanmu harus '{{' dan karakter terakhir harus '}}'.\
+            {grounding_instruction}\n\n\
             Contoh balasan yang benar persis:\n{example}"
         );
 
@@ -411,8 +427,13 @@ impl AiService {
              - \"pelajaran\": nama mata pelajaran jika bisa dideteksi, string kosong \"\" jika tidak",
         );
 
+        let materi_block = match &soal.materi_context {
+            Some(ctx) => format!("MATERI REFERENSI:\n{}\n\n", ctx),
+            None => String::new(),
+        };
+
         let user = format!(
-            "Soal:\n{soal_text}\n\n\
+            "{materi_block}Soal:\n{soal_text}\n\n\
              Pilihan jawaban:\n{options}\n\
              {answer_line}Isi field berikut untuk soal di atas, balas sebagai objek JSON tunggal:\n\
              {field_instructions}",
@@ -916,6 +937,7 @@ mod tests {
             opt5: None,
             correct_answer: Some("B".to_string()),
             fields_to_enrich: vec!["solution".to_string(), "tag".to_string()],
+            materi_context: None,
         }
     }
 
@@ -1103,6 +1125,24 @@ mod tests {
         let soal = sample_soal(); // opt5 = None
         let (_system, user) = AiService::build_prompt(&soal);
         assert!(!user.contains("opt5:"));
+    }
+
+    #[test]
+    fn test_build_prompt_injects_materi_context_when_present() {
+        let mut soal = sample_soal();
+        soal.materi_context = Some("Modul Etika PNS: dedikasi adalah...".to_string());
+        let (system, user) = AiService::build_prompt(&soal);
+        assert!(user.contains("MATERI REFERENSI"));
+        assert!(user.contains("Modul Etika PNS"));
+        assert!(system.contains("sumber kebenaran utama"));
+    }
+
+    #[test]
+    fn test_build_prompt_omits_materi_block_when_absent() {
+        let soal = sample_soal(); // materi_context = None
+        let (system, user) = AiService::build_prompt(&soal);
+        assert!(!user.contains("MATERI REFERENSI"));
+        assert!(!system.contains("sumber kebenaran utama"));
     }
 
     #[test]

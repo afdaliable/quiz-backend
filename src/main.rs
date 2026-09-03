@@ -189,6 +189,7 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_taxonomy_classify_controller)
             .configure(controller::init_soal_quality_controller)
             .configure(controller::init_soal_analytics_controller)
+            .configure(controller::init_materi_library_controller)
             .configure(controller::init_internal_soal_controller)
             .configure(controller::init_question_comment_controller)
             .configure(controller::init_subscription_controller)
