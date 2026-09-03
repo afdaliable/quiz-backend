@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 27] = [
+const PUBLIC_ROUTES: [&str; 29] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -105,6 +105,8 @@ const PUBLIC_ROUTES: [&str; 27] = [
     "/api-docs/openapi.json",
     "/auth/google/callback",
     "/api/auth/google/callback",  // API-prefixed version
+    "/auth/refresh",              // Refresh flow can't require a (possibly expired) access token
+    "/api/auth/refresh",          // API-prefixed version
     "/user/check-phone",
     "/user/update-phone",
     "/api/user/update-phone",

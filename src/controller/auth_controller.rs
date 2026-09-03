@@ -78,6 +78,12 @@ pub struct ValidateSessionRequest {
     pub token: String,
 }
 
+/// Request payload for refreshing an access token
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RefreshTokenRequest {
+    pub refresh_token: String,
+}
+
 /// Response for session validation
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ValidateSessionResponse {
@@ -91,7 +97,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
        .service(google_callback)
        .service(logout)
        .service(get_sessions)
-       .service(validate_session);
+       .service(validate_session)
+       .service(refresh_token);
 }
 
 /// Simple admin login (bypasses Supabase, requires admin role in database)
@@ -566,4 +573,103 @@ async fn validate_session(
             })
         }
     }
+}
+
+/// Exchange a still-valid refresh_token (the session token issued at
+/// login) for a fresh access_token, without re-entering credentials.
+/// The refresh_token itself is not rotated -- it keeps its original
+/// expiry (24h, set at session creation), so the client can keep reusing
+/// the same refresh_token until that window runs out and login is
+/// required again.
+#[utoipa::path(
+    post,
+    path = "/auth/refresh",
+    request_body = RefreshTokenRequest,
+    responses(
+        (status = 200, description = "Token refreshed successfully", body = AuthResponse),
+        (status = 401, description = "Refresh token invalid or expired"),
+        (status = 500, description = "Internal server error")
+    ),
+    tag = "auth",
+    security() // Empty security means no authentication required
+)]
+#[post("/auth/refresh")]
+async fn refresh_token(
+    req: web::Json<RefreshTokenRequest>,
+    app_state: web::Data<AppState<'_>>,
+) -> impl Responder {
+    let session = match app_state.context.sessions.get_session_by_token(&req.refresh_token).await {
+        Ok(s) => s,
+        Err(_) => {
+            return HttpResponse::Unauthorized().json(json!({
+                "error": "invalid_refresh_token",
+                "message": "Refresh token is invalid or expired. Please log in again.",
+                "status_code": 401
+            }))
+        }
+    };
+
+    let user = match app_state.context.users.get_user_by_id(&session.user_id).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            return HttpResponse::Unauthorized().json(json!({
+                "error": "user_not_found",
+                "message": "User for this session no longer exists.",
+                "status_code": 401
+            }))
+        }
+        Err(e) => {
+            eprintln!("User lookup error during refresh: {:?}", e);
+            return HttpResponse::InternalServerError().json(json!({
+                "error": "db_error",
+                "message": "Failed to look up user.",
+                "status_code": 500
+            }));
+        }
+    };
+
+    let now = Utc::now();
+    let expiration = now
+        .checked_add_signed(Duration::hours(1))
+        .expect("valid timestamp")
+        .timestamp() as usize;
+
+    let claims = Claims {
+        sub: user.id.clone(),
+        exp: expiration,
+        iat: now.timestamp() as usize,
+        aud: app_state.config.get_app_url().to_string(),
+        iss: app_state.config.get_app_url().to_string(),
+        email: user.email.clone(),
+        name: user.display_name.clone(),
+    };
+
+    let jwt = match encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(app_state.config.get_jwt_secret().as_bytes()),
+    ) {
+        Ok(jwt) => jwt,
+        Err(e) => {
+            eprintln!("JWT encoding error during refresh: {:?}", e);
+            return HttpResponse::InternalServerError().json(json!({
+                "error": "token_generation_failed",
+                "message": "Failed to generate token",
+                "status_code": 500
+            }));
+        }
+    };
+
+    HttpResponse::Ok().json(AuthResponse {
+        access_token: jwt,
+        token_type: "bearer".to_string(),
+        expires_in: 3600,
+        refresh_token: session.token,
+        user: SupabaseUser {
+            id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            picture: user.picture_url,
+        },
+    })
 }
