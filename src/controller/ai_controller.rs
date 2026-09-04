@@ -136,7 +136,8 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .route(
                 "/questions/bulk-enrich/{job_id}",
                 web::delete().to(cancel_bulk_job),
-            ),
+            )
+            .route("/usage/stats", web::get().to(get_usage_stats)),
     );
 }
 
@@ -518,6 +519,186 @@ async fn cancel_bulk_job(
             HttpResponse::InternalServerError().json(err("db_error", "Failed to cancel job."))
         }
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Handler: GET /ai/usage/stats
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct UsageStatsQuery {
+    /// "YYYY-MM", defaults to the current month.
+    month: Option<String>,
+}
+
+#[derive(Serialize)]
+struct UsagePeriodStats {
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+    cost_usd: f64,
+    question_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    job_count: Option<i64>,
+}
+
+#[derive(Serialize)]
+struct UsageFieldBreakdown {
+    field: String,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+    cost_usd: f64,
+    count: i64,
+}
+
+#[derive(Serialize)]
+struct UsageDailyStat {
+    date: String,
+    prompt_tokens: i64,
+    completion_tokens: i64,
+    total_tokens: i64,
+    cost_usd: f64,
+    question_count: i64,
+}
+
+#[derive(Serialize)]
+struct UsageStatsResponse {
+    month: String,
+    monthly: UsagePeriodStats,
+    today: UsagePeriodStats,
+    by_field: Vec<UsageFieldBreakdown>,
+    daily: Vec<UsageDailyStat>,
+}
+
+#[derive(sqlx::FromRow)]
+struct UsageLogRow {
+    question_id: i64,
+    job_id: Option<String>,
+    fields_requested: String,
+    prompt_tokens: i32,
+    completion_tokens: i32,
+    // sqlx can't decode DECIMAL directly into a Rust numeric type (same
+    // issue hit elsewhere in this codebase, e.g. xp_service.rs) -- CAST to
+    // DOUBLE in the query below instead of pulling in rust_decimal for one field.
+    cost_estimate_usd: f64,
+    created_at: chrono::NaiveDateTime,
+}
+
+/// Backs the "Penggunaan AI" dashboard. `ai_usage_logs` is small (one row
+/// per enrich call, not per token), so this fetches the month's rows once
+/// and aggregates in Rust rather than juggling several GROUP BY queries --
+/// simpler, and per-field attribution needs Rust-side JSON array handling
+/// anyway (`fields_requested` is a JSON array like `["solution","tag"]`;
+/// a call requesting 2 fields counts its full cost toward each field's
+/// breakdown -- there's no way to split a single LLM call's cost cleanly
+/// between the fields it filled).
+async fn get_usage_stats(
+    query: web::Query<UsageStatsQuery>,
+    data: web::Data<AppState<'_>>,
+) -> impl Responder {
+    let pool = &*data.context.soal.pool;
+    let month = query
+        .month
+        .clone()
+        .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m").to_string());
+
+    let rows: Vec<UsageLogRow> = match sqlx::query_as::<_, UsageLogRow>(
+        r#"
+        SELECT question_id, job_id, fields_requested, prompt_tokens, completion_tokens,
+               CAST(cost_estimate_usd AS DOUBLE) AS cost_estimate_usd, created_at
+        FROM dbquizapp.ai_usage_logs
+        WHERE DATE_FORMAT(created_at, '%Y-%m') = ?
+        "#,
+    )
+    .bind(&month)
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("[ai_controller] usage stats query error: {:?}", e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to fetch usage stats."));
+        }
+    };
+
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    let mut monthly = UsagePeriodStats { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0.0, question_count: 0, job_count: Some(0) };
+    let mut today_stats = UsagePeriodStats { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cost_usd: 0.0, question_count: 0, job_count: None };
+    let mut field_totals: std::collections::HashMap<String, UsageFieldBreakdown> = std::collections::HashMap::new();
+    let mut daily_totals: std::collections::BTreeMap<String, UsageDailyStat> = std::collections::BTreeMap::new();
+    let mut month_question_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut month_job_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut today_question_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+    for row in &rows {
+        let cost = row.cost_estimate_usd;
+        let row_date = row.created_at.format("%Y-%m-%d").to_string();
+
+        monthly.prompt_tokens += row.prompt_tokens as i64;
+        monthly.completion_tokens += row.completion_tokens as i64;
+        monthly.cost_usd += cost;
+        month_question_ids.insert(row.question_id);
+        if let Some(jid) = &row.job_id {
+            month_job_ids.insert(jid.clone());
+        }
+
+        if row_date == today {
+            today_stats.prompt_tokens += row.prompt_tokens as i64;
+            today_stats.completion_tokens += row.completion_tokens as i64;
+            today_stats.cost_usd += cost;
+            today_question_ids.insert(row.question_id);
+        }
+
+        let day_entry = daily_totals.entry(row_date.clone()).or_insert(UsageDailyStat {
+            date: row_date,
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            cost_usd: 0.0,
+            question_count: 0,
+        });
+        day_entry.prompt_tokens += row.prompt_tokens as i64;
+        day_entry.completion_tokens += row.completion_tokens as i64;
+        day_entry.total_tokens += (row.prompt_tokens + row.completion_tokens) as i64;
+        day_entry.cost_usd += cost;
+        day_entry.question_count += 1;
+
+        let fields: Vec<String> = serde_json::from_str(&row.fields_requested).unwrap_or_default();
+        for field in fields {
+            let entry = field_totals.entry(field.clone()).or_insert(UsageFieldBreakdown {
+                field,
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+                cost_usd: 0.0,
+                count: 0,
+            });
+            entry.prompt_tokens += row.prompt_tokens as i64;
+            entry.completion_tokens += row.completion_tokens as i64;
+            entry.total_tokens += (row.prompt_tokens + row.completion_tokens) as i64;
+            entry.cost_usd += cost;
+            entry.count += 1;
+        }
+    }
+
+    monthly.total_tokens = monthly.prompt_tokens + monthly.completion_tokens;
+    monthly.question_count = month_question_ids.len() as i64;
+    monthly.job_count = Some(month_job_ids.len() as i64);
+    today_stats.total_tokens = today_stats.prompt_tokens + today_stats.completion_tokens;
+    today_stats.question_count = today_question_ids.len() as i64;
+
+    let mut by_field: Vec<UsageFieldBreakdown> = field_totals.into_values().collect();
+    by_field.sort_by(|a, b| b.cost_usd.partial_cmp(&a.cost_usd).unwrap_or(std::cmp::Ordering::Equal));
+
+    HttpResponse::Ok().json(UsageStatsResponse {
+        month,
+        monthly,
+        today: today_stats,
+        by_field,
+        daily: daily_totals.into_values().collect(),
+    })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
