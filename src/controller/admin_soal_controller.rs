@@ -47,7 +47,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
 /// match), stripped of anything but alphanumerics so user input can't
 /// inject boolean-mode operators (+-><()~*"@). Returns None for empty/
 /// punctuation-only input, which the caller treats as "no search filter".
-fn build_fulltext_boolean_query(search: &str) -> Option<String> {
+pub(crate) fn build_fulltext_boolean_query(search: &str) -> Option<String> {
     // Split on ANY non-alphanumeric char, not just whitespace -- MySQL's
     // FULLTEXT parser treats hyphens/punctuation as word boundaries too
     // (indexes "Unsur-unsur" as two words: "unsur", "unsur"). The old

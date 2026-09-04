@@ -1,9 +1,10 @@
 use actix_web::{web, HttpResponse, Result, HttpRequest};
 use sqlx::{MySql, Pool, FromRow};
 use crate::AppState;
+use crate::controller::admin_soal_controller::build_fulltext_boolean_query;
 use crate::model::paket_soal_items::{
-    PaketSoalItem, PaketSoalItemRequest, PaketSoalItemWithDetails, 
-    MappingRequest, MappingResponse, AvailableSoal
+    PaketSoalItem, PaketSoalItemRequest, PaketSoalItemWithDetails,
+    MappingRequest, MappingResponse, AvailableSoal, PaginatedAvailableSoalResponse,
 };
 
 pub fn init(cfg: &mut web::ServiceConfig) {
@@ -86,15 +87,40 @@ pub async fn get_package_questions(
     }
 }
 
-/// Get all available questions for mapping
+#[derive(serde::Deserialize)]
+pub struct AvailableQuestionsQuery {
+    pub page: Option<u32>,
+    pub limit: Option<u32>,
+    pub search: Option<String>,
+    pub modul: Option<String>,
+    pub pelajaran: Option<String>,
+    pub tag: Option<String>,
+    /// "mapped" | "unmapped" -- absent/anything else means both.
+    pub mapped: Option<String>,
+}
+
+/// Get available questions for mapping (paginated + filterable).
+///
+/// Was `SELECT * FROM soal` with no LIMIT at all -- confirmed live: 104MB /
+/// 33.7s response, on every page load of both the standalone Mapping page
+/// and the per-package mapping tab. Same fix pattern as Menu-Soal/
+/// Package-Builder: server pagination + FULLTEXT search instead of loading
+/// the whole table into the browser.
 #[utoipa::path(
     get,
     path = "/admin/paket-soal/{paket_soal_id}/available-questions",
     params(
-        ("paket_soal_id" = i32, Path, description = "Package ID")
+        ("paket_soal_id" = i32, Path, description = "Package ID"),
+        ("page" = Option<u32>, Query, description = "Page number (default: 1)"),
+        ("limit" = Option<u32>, Query, description = "Items per page (default: 50, max: 200)"),
+        ("search" = Option<String>, Query, description = "Search in question text"),
+        ("modul" = Option<String>, Query, description = "Filter by module"),
+        ("pelajaran" = Option<String>, Query, description = "Filter by subject"),
+        ("tag" = Option<String>, Query, description = "Filter by tag"),
+        ("mapped" = Option<String>, Query, description = "'mapped' | 'unmapped' -- default both")
     ),
     responses(
-        (status = 200, description = "List of available questions", body = Vec<AvailableSoal>),
+        (status = 200, description = "Paginated available questions", body = PaginatedAvailableSoalResponse),
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
@@ -106,12 +132,64 @@ pub async fn get_package_questions(
 pub async fn get_available_questions(
     data: web::Data<AppState<'_>>,
     paket_soal_id: web::Path<i32>,
+    query: web::Query<AvailableQuestionsQuery>,
     _http_req: HttpRequest,
 ) -> Result<HttpResponse> {
     let paket_soal_id = paket_soal_id.into_inner();
-    
-    let query = "
-        SELECT 
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(50).min(200);
+    let offset = (page - 1) * limit;
+
+    let mut where_conditions: Vec<String> = vec!["1=1".to_string()];
+    let mut binds: Vec<String> = Vec::new();
+
+    if let Some(search) = query.search.as_deref().filter(|s| !s.is_empty()) {
+        if let Some(boolean_query) = build_fulltext_boolean_query(search) {
+            where_conditions.push("MATCH(s.soal) AGAINST (? IN BOOLEAN MODE)".to_string());
+            binds.push(boolean_query);
+        }
+    }
+    if let Some(modul) = query.modul.as_deref().filter(|s| !s.is_empty()) {
+        where_conditions.push("s.modul = ?".to_string());
+        binds.push(modul.to_string());
+    }
+    if let Some(pelajaran) = query.pelajaran.as_deref().filter(|s| !s.is_empty()) {
+        where_conditions.push("s.pelajaran = ?".to_string());
+        binds.push(pelajaran.to_string());
+    }
+    if let Some(tag) = query.tag.as_deref().filter(|s| !s.is_empty()) {
+        where_conditions.push("s.tag = ?".to_string());
+        binds.push(tag.to_string());
+    }
+    match query.mapped.as_deref() {
+        Some("mapped") => where_conditions.push("psi.soal_id IS NOT NULL".to_string()),
+        Some("unmapped") => where_conditions.push("psi.soal_id IS NULL".to_string()),
+        _ => {}
+    }
+
+    let where_clause = where_conditions.join(" AND ");
+    let pool = &*data.context.soal.pool;
+
+    let count_sql = format!(
+        "SELECT COUNT(*) FROM dbquizapp.soal s \
+         LEFT JOIN dbquizapp.paket_soal_items psi ON s.id = psi.soal_id AND psi.paket_soal_id = ? \
+         WHERE {}",
+        where_clause
+    );
+    let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql).bind(paket_soal_id);
+    for b in &binds {
+        count_q = count_q.bind(b);
+    }
+    let total = match count_q.fetch_one(pool).await {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error counting available questions: {}", e);
+            return Ok(HttpResponse::InternalServerError().json("Failed to count available questions"));
+        }
+    };
+
+    let list_sql = format!(
+        "SELECT
             s.id,
             s.soal as pertanyaan,
             s.opt1,
@@ -130,31 +208,40 @@ pub async fn get_available_questions(
             CASE WHEN psi.soal_id IS NOT NULL THEN 1 ELSE 0 END as is_mapped
         FROM dbquizapp.soal s
         LEFT JOIN dbquizapp.paket_soal_items psi ON s.id = psi.soal_id AND psi.paket_soal_id = ?
+        WHERE {}
         ORDER BY s.id DESC
-    ";
-    
-    match sqlx::query(query)
-        .bind(paket_soal_id)
-        .fetch_all(&*data.context.soal.pool)
-        .await
-    {
-        Ok(rows) => {
-            let questions: Result<Vec<AvailableSoal>, sqlx::Error> = rows
-                .iter()
-                .map(AvailableSoal::from_row)
-                .collect();
-
-            match questions {
-                Ok(questions) => Ok(HttpResponse::Ok().json(questions)),
-                Err(err) => {
-                    eprintln!("Error parsing available questions: {}", err);
-                    Ok(HttpResponse::InternalServerError().json("Failed to parse available questions"))
-                }
-            }
+        LIMIT ? OFFSET ?",
+        where_clause
+    );
+    let mut list_q = sqlx::query(&list_sql).bind(paket_soal_id);
+    for b in &binds {
+        list_q = list_q.bind(b);
+    }
+    let rows = match list_q.bind(limit).bind(offset).fetch_all(pool).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Error fetching available questions: {}", e);
+            return Ok(HttpResponse::InternalServerError().json("Failed to fetch available questions"));
         }
-        Err(err) => {
-            eprintln!("Error fetching available questions: {}", err);
-            Ok(HttpResponse::InternalServerError().json("Failed to fetch available questions"))
+    };
+
+    let questions: Result<Vec<AvailableSoal>, sqlx::Error> =
+        rows.iter().map(AvailableSoal::from_row).collect();
+
+    match questions {
+        Ok(questions) => {
+            let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+            Ok(HttpResponse::Ok().json(PaginatedAvailableSoalResponse {
+                questions,
+                total,
+                page,
+                limit,
+                total_pages,
+            }))
+        }
+        Err(e) => {
+            eprintln!("Error parsing available questions: {}", e);
+            Ok(HttpResponse::InternalServerError().json("Failed to parse available questions"))
         }
     }
 }

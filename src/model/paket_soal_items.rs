@@ -85,22 +85,31 @@ pub struct AvailableSoal {
 impl<'c> FromRow<'c, MySqlRow> for AvailableSoal {
     fn from_row(row: &'c MySqlRow) -> Result<Self, sqlx::Error> {
         Ok(AvailableSoal {
-            id: row.get("id"),
-            pertanyaan: row.get("pertanyaan"),
-            opt1: row.get("opt1"),
-            opt2: row.get("opt2"),
-            opt3: row.get("opt3"),
-            opt4: row.get("opt4"),
-            opt5: row.get("opt5"),
-            correct_answer: row.get("correct_answer"),
-            solution: row.get("solution"),
-            sumberfile: row.get("sumberfile"),
-            modul: row.get("modul"),
-            pelajaran: row.get("pelajaran"),
-            tag: row.get("tag"),
-            kategori: row.get("kategori"),
-            tingkat_kesulitan: row.get("tingkat_kesulitan"),
-            is_mapped: row.get::<i32, _>("is_mapped") > 0,
+            id: row.try_get("id")?,
+            pertanyaan: row.try_get("pertanyaan")?,
+            opt1: row.try_get("opt1")?,
+            opt2: row.try_get("opt2")?,
+            opt3: row.try_get("opt3")?,
+            opt4: row.try_get("opt4")?,
+            opt5: row.try_get("opt5")?,
+            correct_answer: row.try_get("correct_answer")?,
+            solution: row.try_get("solution")?,
+            sumberfile: row.try_get("sumberfile")?,
+            modul: row.try_get("modul")?,
+            pelajaran: row.try_get("pelajaran")?,
+            tag: row.try_get("tag")?,
+            kategori: row.try_get("kategori")?,
+            tingkat_kesulitan: row.try_get("tingkat_kesulitan")?,
+            is_mapped: row.try_get::<i32, _>("is_mapped")? > 0,
         })
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+pub struct PaginatedAvailableSoalResponse {
+    pub questions: Vec<AvailableSoal>,
+    pub total: i64,
+    pub page: u32,
+    pub limit: u32,
+    pub total_pages: u32,
 }
