@@ -97,6 +97,8 @@ pub struct AvailableQuestionsQuery {
     pub tag: Option<String>,
     /// "mapped" | "unmapped" -- absent/anything else means both.
     pub mapped: Option<String>,
+    pub has_answer: Option<bool>,
+    pub has_solution: Option<bool>,
 }
 
 /// Get available questions for mapping (paginated + filterable).
@@ -117,7 +119,9 @@ pub struct AvailableQuestionsQuery {
         ("modul" = Option<String>, Query, description = "Filter by module"),
         ("pelajaran" = Option<String>, Query, description = "Filter by subject"),
         ("tag" = Option<String>, Query, description = "Filter by tag"),
-        ("mapped" = Option<String>, Query, description = "'mapped' | 'unmapped' -- default both")
+        ("mapped" = Option<String>, Query, description = "'mapped' | 'unmapped' -- default both"),
+        ("has_answer" = Option<bool>, Query, description = "true = only with correct_answer set, false = only without"),
+        ("has_solution" = Option<bool>, Query, description = "true = only with solution set, false = only without")
     ),
     responses(
         (status = 200, description = "Paginated available questions", body = PaginatedAvailableSoalResponse),
@@ -165,6 +169,16 @@ pub async fn get_available_questions(
         Some("mapped") => where_conditions.push("psi.soal_id IS NOT NULL".to_string()),
         Some("unmapped") => where_conditions.push("psi.soal_id IS NULL".to_string()),
         _ => {}
+    }
+    match query.has_answer {
+        Some(true) => where_conditions.push("s.correct_answer IS NOT NULL AND s.correct_answer != ''".to_string()),
+        Some(false) => where_conditions.push("(s.correct_answer IS NULL OR s.correct_answer = '')".to_string()),
+        None => {}
+    }
+    match query.has_solution {
+        Some(true) => where_conditions.push("s.solution IS NOT NULL AND s.solution != ''".to_string()),
+        Some(false) => where_conditions.push("(s.solution IS NULL OR s.solution = '')".to_string()),
+        None => {}
     }
 
     let where_clause = where_conditions.join(" AND ");
