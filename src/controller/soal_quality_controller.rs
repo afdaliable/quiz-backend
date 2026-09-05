@@ -468,6 +468,182 @@ async fn list_missing_context(data: web::Data<AppState<'_>>) -> impl Responder {
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Detector: AI-hedged solutions ("perlu diverifikasi dengan buku sumber ...")
+//
+// When AI enrich had to answer an exam question with no source material to
+// work from, it sometimes appended a trailing note admitting it wasn't
+// sure. Confirmed live: only ~11 rows, but they split into two very
+// different kinds, which is why this lists rather than bulk-strips them:
+//
+//   1. Plain hedge -- "Jawaban ini perlu diverifikasi dengan buku sumber
+//      soal." No claim, just uncertainty.
+//   2. The note actively DISPUTES the stored answer key and proposes a
+//      different one -- e.g. "kunci A (Etos Kerja) tidak sesuai dengan
+//      definisi ... jawabannya lebih tepat B (Kompetensi)".
+//
+// Kind 2 is a candidate answer-key error, which is worth more than the
+// note is worth removing -- deleting the note would destroy the only
+// record that anything was ever questioned. So: read-only detector,
+// `disputes_key` + `proposed_answer` surfaced, and the actual fix goes
+// through the normal AI re-enrich (now materi-library grounded) with a
+// human reviewing the result.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// True when `solution` contains an AI self-flagged verification note.
+fn has_verification_hedge(solution: &str, re: &Regex) -> bool {
+    re.is_match(solution)
+}
+
+/// Extracts the option letter the note proposes instead of the stored key,
+/// e.g. "jawabannya lebih tepat B (Kompetensi)" -> Some("opt2"). Returns
+/// None when the note only expresses doubt without naming a replacement.
+fn extract_proposed_answer(solution: &str, re: &Regex) -> Option<String> {
+    let caps = re.captures(solution)?;
+    let letter = caps.get(1)?.as_str().to_ascii_uppercase();
+    let idx = match letter.as_str() {
+        "A" => 1,
+        "B" => 2,
+        "C" => 3,
+        "D" => 4,
+        "E" => 5,
+        _ => return None,
+    };
+    Some(format!("opt{}", idx))
+}
+
+#[derive(sqlx::FromRow)]
+struct HedgedRow {
+    id: i64,
+    soal: String,
+    solution: String,
+    correct_answer: Option<String>,
+    modul: Option<String>,
+    pelajaran: Option<String>,
+    subcategory_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HedgedAnswerItem {
+    id: i64,
+    soal: String,
+    correct_answer: Option<String>,
+    /// Just the flagged note, not the whole solution -- enough for an
+    /// admin to triage without paging through the full explanation.
+    note: String,
+    /// True when the note argues the stored answer key is wrong.
+    disputes_key: bool,
+    /// Answer the note proposes instead ("opt1".."opt5"), when it names one.
+    proposed_answer: Option<String>,
+    /// Whether reference material exists for this soal's subcategory --
+    /// if false, re-running AI enrich will just hedge again.
+    has_materi: bool,
+    modul: Option<String>,
+    pelajaran: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HedgedAnswerResponse {
+    total: usize,
+    disputes_key_count: usize,
+    items: Vec<HedgedAnswerItem>,
+}
+
+/// GET /admin/soal-quality/unverified-answers
+#[get("/unverified-answers")]
+async fn list_unverified_answers(data: web::Data<AppState<'_>>) -> impl Responder {
+    let pool = &*data.context.soal.pool;
+
+    // Cheap SQL prefilter (no index helps on a LIKE over `solution`, but
+    // this narrows 54k rows to a handful before the regex work); the
+    // regex below is what actually decides.
+    let rows = match sqlx::query_as::<_, HedgedRow>(
+        r#"
+        SELECT id, soal, solution, correct_answer, modul, pelajaran, subcategory_id
+        FROM dbquizapp.soal
+        WHERE solution IS NOT NULL
+          AND (   solution LIKE '%verifikasi%'
+               OR solution LIKE '%dikonfirmasi%'
+               OR solution LIKE '%buku sumber%' )
+        ORDER BY id
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[soal_quality_controller] DB error (unverified): {:?}", e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to query soal."));
+        }
+    };
+
+    let hedge_re = Regex::new(
+        r"(?i)((perlu|memerlukan|mohon|harap|sebaiknya)\s+(di)?(verifikasi|konfirmasi|periksa)|perlu\s+dicek)",
+    )
+    .unwrap();
+    // Sentence containing the hedge, so the admin sees context not just a match.
+    let note_re = Regex::new(
+        r"(?i)[^.!?\n]*((perlu|memerlukan|mohon|harap|sebaiknya)\s+(di)?(verifikasi|konfirmasi|periksa)|perlu\s+dicek)[^.!?\n]*[.!?]?",
+    )
+    .unwrap();
+    let disputes_re = Regex::new(
+        r"(?i)(lebih\s+tepat|tidak\s+sesuai|seharusnya|kurang\s+tepat|keliru|salah)",
+    )
+    .unwrap();
+    let proposed_re = Regex::new(
+        r"(?i)(?:jawaban(?:nya)?\s+)?(?:yang\s+)?(?:lebih\s+tepat|seharusnya)\s+(?:adalah\s+)?\(?([A-E])\b",
+    )
+    .unwrap();
+
+    // One query for which subcategories actually have reference material,
+    // instead of a per-row lookup.
+    let materi_subcats: std::collections::HashSet<String> =
+        sqlx::query_scalar::<_, String>("SELECT DISTINCT subcategory_id FROM dbquizapp.materi_library")
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+    let mut items: Vec<HedgedAnswerItem> = Vec::new();
+    for r in rows {
+        if !has_verification_hedge(&r.solution, &hedge_re) {
+            continue;
+        }
+        let note = note_re
+            .find(&r.solution)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let disputes_key = disputes_re.is_match(&note);
+        items.push(HedgedAnswerItem {
+            id: r.id,
+            soal: r.soal,
+            correct_answer: r.correct_answer,
+            proposed_answer: extract_proposed_answer(&note, &proposed_re),
+            disputes_key,
+            has_materi: r
+                .subcategory_id
+                .as_ref()
+                .map(|s| materi_subcats.contains(s))
+                .unwrap_or(false),
+            note,
+            modul: r.modul,
+            pelajaran: r.pelajaran,
+        });
+    }
+
+    // Disputed keys first -- those are the ones worth a human's time.
+    items.sort_by(|a, b| b.disputes_key.cmp(&a.disputes_key).then(a.id.cmp(&b.id)));
+    let disputes_key_count = items.iter().filter(|i| i.disputes_key).count();
+
+    HttpResponse::Ok().json(HedgedAnswerResponse {
+        total: items.len(),
+        disputes_key_count,
+        items,
+    })
+}
+
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/soal-quality")
@@ -475,13 +651,65 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(list_merged_options)
             .service(fix_merged_options)
             .service(get_fix_job)
-            .service(list_missing_context),
+            .service(list_missing_context)
+            .service(list_unverified_answers),
     );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hedge_re() -> Regex {
+        Regex::new(r"(?i)((perlu|memerlukan|mohon|harap|sebaiknya)\s+(di)?(verifikasi|konfirmasi|periksa)|perlu\s+dicek)").unwrap()
+    }
+    fn proposed_re() -> Regex {
+        Regex::new(r"(?i)(?:jawaban(?:nya)?\s+)?(?:yang\s+)?(?:lebih\s+tepat|seharusnya)\s+(?:adalah\s+)?\(?([A-E])\b").unwrap()
+    }
+
+    #[test]
+    fn detects_plain_verification_hedge() {
+        let re = hedge_re();
+        assert!(has_verification_hedge(
+            "Jawaban ini perlu diverifikasi dengan buku sumber soal yang digunakan.",
+            &re
+        ));
+        assert!(has_verification_hedge("Mohon verifikasi dengan sumber modul pelatihan.", &re));
+        assert!(has_verification_hedge("Jawaban ini memerlukan verifikasi dengan sumber.", &re));
+    }
+
+    #[test]
+    fn ignores_solutions_without_a_hedge() {
+        let re = hedge_re();
+        // "verifikasi" as ordinary subject matter, not the AI hedging.
+        assert!(!has_verification_hedge(
+            "Auditor melakukan verifikasi dokumen sebelum menerbitkan laporan.",
+            &re
+        ));
+        assert!(!has_verification_hedge("PP 42/2004 mengatur kode etik PNS.", &re));
+    }
+
+    #[test]
+    fn extracts_proposed_answer_letter() {
+        let re = proposed_re();
+        assert_eq!(
+            extract_proposed_answer("jawabannya lebih tepat B (Kompetensi)", &re),
+            Some("opt2".to_string())
+        );
+        assert_eq!(
+            extract_proposed_answer("seharusnya adalah D menurut teori tersebut", &re),
+            Some("opt4".to_string())
+        );
+    }
+
+    #[test]
+    fn no_proposed_answer_when_note_only_doubts() {
+        let re = proposed_re();
+        assert_eq!(
+            extract_proposed_answer("Jawaban ini perlu diverifikasi dengan buku sumber soal.", &re),
+            None
+        );
+    }
 
     #[test]
     fn splits_clean_four_way_merge() {
