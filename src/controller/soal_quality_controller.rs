@@ -675,6 +675,23 @@ pub struct ReverifyRequest {
     /// to ask for the write explicitly.
     #[serde(default)]
     pub apply: bool,
+    /// Accept the fresh run's answer on its own, instead of requiring it
+    /// to agree with a note's proposal.
+    ///
+    /// The default "two signals must agree" rule can't fire for soal that
+    /// were never disputed by a note -- e.g. the 332 scraped soal whose
+    /// key was a placeholder `opt1` supplied only because the API used to
+    /// demand a value. For those the stored key isn't evidence at all, so
+    /// there is nothing to corroborate against and the strict rule would
+    /// reject every row.
+    ///
+    /// Only defensible where the answer is genuinely derivable from
+    /// material the model was given -- e.g. reading-comprehension soal
+    /// whose passage lives in `passages` and is now sent in the prompt.
+    /// Do NOT use it for soal that need a source the model can't see
+    /// (listening audio, figural images, an external training module).
+    #[serde(default)]
+    pub trust_fresh: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -765,9 +782,10 @@ async fn start_reverify(
 
     let total = ids.len();
     let apply = body.apply;
+    let trust_fresh = body.trust_fresh;
     let job_id_clone = job_id.clone();
     tokio::spawn(async move {
-        run_reverify_job(job_id_clone, ids, apply, pool, ai_service, admin_email).await;
+        run_reverify_job(job_id_clone, ids, apply, trust_fresh, pool, ai_service, admin_email).await;
     });
 
     HttpResponse::Accepted().json(ReverifyAcceptedResponse {
@@ -819,6 +837,7 @@ async fn run_reverify_job(
     job_id: String,
     ids: Vec<i64>,
     apply: bool,
+    trust_fresh: bool,
     pool: Arc<MySqlPool>,
     ai_service: Arc<crate::service::ai_service::AiService>,
     admin_email: String,
@@ -944,11 +963,56 @@ async fn run_reverify_job(
             .await;
         }
 
+        // In trust_fresh mode the stored key carries no evidential weight
+        // (it's a known placeholder), so "fresh == stored" means only that
+        // the model happened to land on the same option -- ~1-in-4 by
+        // chance. It is not corroboration, and must not be reported as
+        // confirmed_ok.
+        let corroborated = match (&fresh_answer, &note_proposed) {
+            (Some(fresh), Some(prop)) => fresh == prop,
+            (Some(_), None) => trust_fresh,
+            _ => false,
+        };
+
         let (outcome, reason) = match (&fresh_answer, &note_proposed, &stored_answer) {
-            (Some(fresh), _, Some(stored)) if fresh == stored => (
+            (Some(fresh), _, Some(stored)) if fresh == stored && !trust_fresh => (
                 "confirmed_ok",
                 "fresh run reproduced the stored key -- note was a false alarm".to_string(),
             ),
+            (Some(fresh), _, _) if corroborated && note_proposed.is_none() => {
+                if apply {
+                    let upd = sqlx::query(
+                        "UPDATE dbquizapp.soal SET correct_answer=?, solution=?, updated_at=NOW() WHERE id=?",
+                    )
+                    .bind(fresh)
+                    .bind(enriched.solution.as_deref().unwrap_or_default())
+                    .bind(qid)
+                    .execute(&*pool)
+                    .await;
+                    match upd {
+                        Ok(_) => {
+                            let _ = sqlx::query(
+                                "UPDATE dbquizapp.ai_generated_content SET accepted=1, accepted_at=NOW(), accepted_by=? WHERE job_id=? AND question_id=?",
+                            )
+                            .bind(&admin_email)
+                            .bind(&job_id)
+                            .bind(qid)
+                            .execute(&*pool)
+                            .await;
+                            (
+                                "applied",
+                                "trust_fresh: stored key was a known placeholder, fresh run derived from the soal's own passage".to_string(),
+                            )
+                        }
+                        Err(e) => ("failed", format!("DB update failed: {}", e)),
+                    }
+                } else {
+                    (
+                        "needs_review",
+                        "trust_fresh dry run -- would replace the placeholder key with the fresh answer".to_string(),
+                    )
+                }
+            }
             (Some(fresh), Some(prop), _) if fresh == prop => {
                 if apply {
                     let upd = sqlx::query(
