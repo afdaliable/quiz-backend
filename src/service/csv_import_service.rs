@@ -435,7 +435,9 @@ impl CsvImportService {
                 opt3,
                 opt4,
                 opt5,
-                correct_answer: correct_answer.unwrap_or_default(),
+                // Pass "unknown" through as NULL instead of collapsing it
+                // to a placeholder -- see CreateSoalRequest.correct_answer.
+                correct_answer,
                 solution,
                 sumberfile: if sumberfile.is_empty() { None } else { Some(sumberfile) },
                 modul: if modul.is_empty() { None } else { Some(modul) },

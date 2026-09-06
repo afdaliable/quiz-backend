@@ -84,8 +84,18 @@ pub struct CreateSoalRequest {
     pub opt4: String,
     /// Fifth option
     pub opt5: String,
-    /// The correct answer
-    pub correct_answer: String,
+    /// The correct answer ("opt1".."opt5"), or None when genuinely not
+    /// known yet.
+    ///
+    /// This was a required `String`, which forced every caller to supply
+    /// *something* -- so importers/scrapers that hadn't obtained the answer
+    /// key filled in "opt1" as a placeholder. Confirmed live: 332 soal
+    /// across 10 modules (KLC-*, RAIEDU-*) sit at 100% opt1, statistically
+    /// impossible for real exam content, and 257 of them then had AI
+    /// explanations generated that argue *for* that fabricated key.
+    /// Callers must be able to say "unknown" honestly; the DB column has
+    /// always been nullable.
+    pub correct_answer: Option<String>,
     /// Solution explanation
     pub solution: String,
     /// Source file
