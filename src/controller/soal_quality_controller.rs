@@ -644,6 +644,437 @@ async fn list_unverified_answers(data: web::Data<AppState<'_>>) -> impl Responde
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Pipeline: re-verify (and conditionally correct) disputed answer keys
+//
+// The note that flagged these soal came from an AI run that said, in the
+// same breath, that it wasn't sure -- so its `proposed_answer` is exactly
+// the output which declared itself unreliable. Applying it directly would
+// be trusting the thing that told you not to trust it.
+//
+// Instead: run a FRESH enrich, now grounded in materi_library (proven on
+// soal 51 -- with the Modul Etika PNS text in context the model found the
+// deliberate word-swap distractor it had missed without it), then only
+// overwrite the stored key when that independent run AGREES with the old
+// note's proposal. Two signals concurring. Every other combination is
+// counted and left for a human.
+//
+// Every AI answer -- applied or not -- is recorded in
+// ai_generated_content with original_value intact, so any change here is
+// reviewable and revertable after the fact.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct ReverifyRequest {
+    /// Specific soal ids. Empty = every soal the detector flags as
+    /// disputing its own answer key.
+    #[serde(default)]
+    pub question_ids: Vec<i64>,
+    /// When false (default), nothing is written -- the job only reports
+    /// what it *would* do. Answer keys are exam content; the caller has
+    /// to ask for the write explicitly.
+    #[serde(default)]
+    pub apply: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ReverifyOutcome {
+    id: i64,
+    stored_answer: Option<String>,
+    /// What the old (self-doubting) note proposed.
+    note_proposed: Option<String>,
+    /// What the fresh grounded run concluded.
+    fresh_answer: Option<String>,
+    had_materi: bool,
+    /// applied | needs_review | confirmed_ok | failed
+    outcome: String,
+    reason: String,
+}
+
+#[derive(Serialize)]
+struct ReverifyAcceptedResponse {
+    job_id: String,
+    status: String,
+    total: usize,
+    apply: bool,
+    poll_url: String,
+}
+
+#[derive(Serialize)]
+struct ReverifyStatusResponse {
+    job_id: String,
+    status: String,
+    total: i32,
+    processed: i32,
+    applied: i32,
+    needs_review: i32,
+    confirmed_ok: i32,
+    failed: i32,
+    results: Vec<ReverifyOutcome>,
+    error_message: Option<String>,
+    completed_at: Option<String>,
+}
+
+/// POST /admin/soal-quality/unverified-answers/reverify
+#[post("/unverified-answers/reverify")]
+async fn start_reverify(
+    body: web::Json<ReverifyRequest>,
+    data: web::Data<AppState<'_>>,
+    http_req: actix_web::HttpRequest,
+) -> impl Responder {
+    let ai_service = match &data.ai_service {
+        Some(svc) => Arc::clone(svc),
+        None => {
+            return HttpResponse::ServiceUnavailable()
+                .json(err("ai_service_unavailable", "AI service is not configured on this server."))
+        }
+    };
+    let pool = Arc::clone(&data.context.soal.pool);
+    let admin_email = http_req
+        .headers()
+        .get("user_id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    let ids = match resolve_disputed_ids(&pool, &body.question_ids).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            eprintln!("[soal_quality_controller] reverify id resolve error: {:?}", e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to resolve target soal."));
+        }
+    };
+    if ids.is_empty() {
+        return HttpResponse::BadRequest()
+            .json(err("no_targets", "No soal matched -- nothing disputes its answer key."));
+    }
+
+    let job_id = Uuid::new_v4().to_string();
+    if let Err(e) = sqlx::query(
+        "INSERT INTO dbquizapp.answer_reverify_jobs (id, status, total, created_by) VALUES (?, 'pending', ?, ?)",
+    )
+    .bind(&job_id)
+    .bind(ids.len() as i32)
+    .bind(&admin_email)
+    .execute(&*pool)
+    .await
+    {
+        eprintln!("[soal_quality_controller] reverify job insert failed: {:?}", e);
+        return HttpResponse::InternalServerError().json(err("db_error", "Failed to create job."));
+    }
+
+    let total = ids.len();
+    let apply = body.apply;
+    let job_id_clone = job_id.clone();
+    tokio::spawn(async move {
+        run_reverify_job(job_id_clone, ids, apply, pool, ai_service, admin_email).await;
+    });
+
+    HttpResponse::Accepted().json(ReverifyAcceptedResponse {
+        poll_url: format!("/admin/soal-quality/unverified-answers/reverify/{}", job_id),
+        job_id,
+        status: "pending".to_string(),
+        total,
+        apply,
+    })
+}
+
+/// Targets: explicit ids, or every soal whose hedge note disputes its key.
+async fn resolve_disputed_ids(pool: &MySqlPool, explicit: &[i64]) -> Result<Vec<i64>, sqlx::Error> {
+    if !explicit.is_empty() {
+        return Ok(explicit.to_vec());
+    }
+    let rows = sqlx::query_as::<_, (i64, String)>(
+        r#"
+        SELECT id, solution FROM dbquizapp.soal
+        WHERE solution IS NOT NULL
+          AND (solution LIKE '%verifikasi%' OR solution LIKE '%dikonfirmasi%' OR solution LIKE '%buku sumber%')
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let hedge_re = Regex::new(
+        r"(?i)((perlu|memerlukan|mohon|harap|sebaiknya)\s+(di)?(verifikasi|konfirmasi|periksa)|perlu\s+dicek)",
+    )
+    .unwrap();
+    let note_re = Regex::new(
+        r"(?i)[^.!?\n]*((perlu|memerlukan|mohon|harap|sebaiknya)\s+(di)?(verifikasi|konfirmasi|periksa)|perlu\s+dicek)[^.!?\n]*[.!?]?",
+    )
+    .unwrap();
+    let disputes_re =
+        Regex::new(r"(?i)(lebih\s+tepat|tidak\s+sesuai|seharusnya|kurang\s+tepat|keliru|salah)").unwrap();
+
+    Ok(rows
+        .into_iter()
+        .filter(|(_, sol)| {
+            hedge_re.is_match(sol)
+                && note_re.find(sol).map(|m| disputes_re.is_match(m.as_str())).unwrap_or(false)
+        })
+        .map(|(id, _)| id)
+        .collect())
+}
+
+async fn run_reverify_job(
+    job_id: String,
+    ids: Vec<i64>,
+    apply: bool,
+    pool: Arc<MySqlPool>,
+    ai_service: Arc<crate::service::ai_service::AiService>,
+    admin_email: String,
+) {
+    let _ = sqlx::query("UPDATE dbquizapp.answer_reverify_jobs SET status='running' WHERE id=?")
+        .bind(&job_id)
+        .execute(&*pool)
+        .await;
+
+    let proposed_re = Regex::new(
+        r"(?i)(?:jawaban(?:nya)?\s+)?(?:yang\s+)?(?:lebih\s+tepat|seharusnya)\s+(?:adalah\s+)?\(?([A-E])\b",
+    )
+    .unwrap();
+
+    let mut results: Vec<ReverifyOutcome> = Vec::new();
+    let (mut applied, mut needs_review, mut confirmed_ok, mut failed) = (0i32, 0i32, 0i32, 0i32);
+
+    for (i, qid) in ids.iter().enumerate() {
+        let soal = match sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
+            r#"
+            SELECT id, soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, subcategory_id
+            FROM dbquizapp.soal WHERE id = ?
+            "#,
+        )
+        .bind(qid)
+        .fetch_optional(&*pool)
+        .await
+        {
+            Ok(Some(s)) => s,
+            _ => {
+                failed += 1;
+                results.push(ReverifyOutcome {
+                    id: *qid,
+                    stored_answer: None,
+                    note_proposed: None,
+                    fresh_answer: None,
+                    had_materi: false,
+                    outcome: "failed".to_string(),
+                    reason: "soal not found".to_string(),
+                });
+                continue;
+            }
+        };
+        let (_, soal_text, o1, o2, o3, o4, o5, stored_answer, old_solution, subcategory_id) = soal;
+
+        let note_proposed = old_solution
+            .as_deref()
+            .and_then(|s| extract_proposed_answer(s, &proposed_re));
+
+        let materi_context = crate::controller::materi_library_controller::get_materi_context_for_soal(
+            &pool,
+            subcategory_id.as_deref(),
+            None,
+        )
+        .await;
+        let had_materi = materi_context.is_some();
+
+        // correct_answer is requested explicitly so build_prompt re-derives
+        // it instead of taking the stored (suspect) key as given.
+        let ctx = crate::service::ai_service::SoalContext {
+            id: *qid,
+            soal: soal_text,
+            opt1: o1,
+            opt2: o2,
+            opt3: o3,
+            opt4: o4,
+            opt5: o5,
+            correct_answer: stored_answer.clone(),
+            fields_to_enrich: vec!["correct_answer".to_string(), "solution".to_string()],
+            materi_context,
+        };
+
+        let enriched = match ai_service.enrich_question(&ctx).await {
+            Ok(e) => e,
+            Err(e) => {
+                failed += 1;
+                results.push(ReverifyOutcome {
+                    id: *qid,
+                    stored_answer: stored_answer.clone(),
+                    note_proposed,
+                    fresh_answer: None,
+                    had_materi,
+                    outcome: "failed".to_string(),
+                    reason: format!("AI failed: {}", e),
+                });
+                continue;
+            }
+        };
+        let fresh_answer = enriched.correct_answer.clone();
+
+        // Record the AI output regardless of whether it gets applied --
+        // original_value preserved so this is revertable.
+        if let Some(ref fresh) = fresh_answer {
+            let _ = sqlx::query(
+                r#"
+                INSERT INTO dbquizapp.ai_generated_content
+                    (question_id, job_id, field_name, original_value, generated_value, provider, model, accepted)
+                VALUES (?, ?, 'correct_answer', ?, ?, ?, ?, 0)
+                "#,
+            )
+            .bind(qid)
+            .bind(&job_id)
+            .bind(&stored_answer)
+            .bind(fresh)
+            .bind(&enriched.provider_used)
+            .bind(&enriched.model_used)
+            .execute(&*pool)
+            .await;
+        }
+
+        let (outcome, reason) = match (&fresh_answer, &note_proposed, &stored_answer) {
+            (Some(fresh), _, Some(stored)) if fresh == stored => (
+                "confirmed_ok",
+                "fresh run reproduced the stored key -- note was a false alarm".to_string(),
+            ),
+            (Some(fresh), Some(prop), _) if fresh == prop => {
+                if apply {
+                    let upd = sqlx::query(
+                        "UPDATE dbquizapp.soal SET correct_answer=?, solution=?, updated_at=NOW() WHERE id=?",
+                    )
+                    .bind(fresh)
+                    .bind(enriched.solution.as_deref().unwrap_or_default())
+                    .bind(qid)
+                    .execute(&*pool)
+                    .await;
+                    match upd {
+                        Ok(_) => {
+                            let _ = sqlx::query(
+                                "UPDATE dbquizapp.ai_generated_content SET accepted=1, accepted_at=NOW(), accepted_by=? WHERE job_id=? AND question_id=?",
+                            )
+                            .bind(&admin_email)
+                            .bind(&job_id)
+                            .bind(qid)
+                            .execute(&*pool)
+                            .await;
+                            ("applied", "fresh grounded run agreed with the note's proposal".to_string())
+                        }
+                        Err(e) => ("failed", format!("DB update failed: {}", e)),
+                    }
+                } else {
+                    (
+                        "needs_review",
+                        "would apply (fresh run agrees with note) -- dry run, set apply=true to write".to_string(),
+                    )
+                }
+            }
+            (Some(_), Some(_), _) => (
+                "needs_review",
+                "fresh run and note disagree on the answer -- human decides".to_string(),
+            ),
+            (Some(_), None, _) => (
+                "needs_review",
+                "note doubted the key but named no replacement -- nothing to corroborate".to_string(),
+            ),
+            _ => ("needs_review", "AI returned no answer".to_string()),
+        };
+
+        match outcome {
+            "applied" => applied += 1,
+            "confirmed_ok" => confirmed_ok += 1,
+            "failed" => failed += 1,
+            _ => needs_review += 1,
+        }
+        results.push(ReverifyOutcome {
+            id: *qid,
+            stored_answer,
+            note_proposed,
+            fresh_answer,
+            had_materi,
+            outcome: outcome.to_string(),
+            reason,
+        });
+
+        let _ = sqlx::query(
+            "UPDATE dbquizapp.answer_reverify_jobs SET processed=?, applied=?, needs_review=?, confirmed_ok=?, failed_count=? WHERE id=?",
+        )
+        .bind((i + 1) as i32)
+        .bind(applied)
+        .bind(needs_review)
+        .bind(confirmed_ok)
+        .bind(failed)
+        .bind(&job_id)
+        .execute(&*pool)
+        .await;
+    }
+
+    let results_json = serde_json::to_string(&results).unwrap_or_else(|_| "[]".to_string());
+    let _ = sqlx::query(
+        "UPDATE dbquizapp.answer_reverify_jobs SET status='completed', results_json=?, completed_at=NOW() WHERE id=?",
+    )
+    .bind(&results_json)
+    .bind(&job_id)
+    .execute(&*pool)
+    .await;
+}
+
+/// GET /admin/soal-quality/unverified-answers/reverify/{job_id}
+#[get("/unverified-answers/reverify/{job_id}")]
+async fn get_reverify_job(path: web::Path<String>, data: web::Data<AppState<'_>>) -> impl Responder {
+    let job_id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    #[derive(sqlx::FromRow)]
+    struct JobRow {
+        status: String,
+        total: i32,
+        processed: i32,
+        applied: i32,
+        needs_review: i32,
+        confirmed_ok: i32,
+        failed_count: i32,
+        results_json: Option<String>,
+        error_message: Option<String>,
+        completed_at: Option<chrono::DateTime<chrono::Utc>>,
+    }
+
+    let job = match sqlx::query_as::<_, JobRow>(
+        r#"
+        SELECT status, total, processed, applied, needs_review, confirmed_ok,
+               failed_count, results_json, error_message, completed_at
+        FROM dbquizapp.answer_reverify_jobs WHERE id = ?
+        "#,
+    )
+    .bind(&job_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(j)) => j,
+        Ok(None) => return HttpResponse::NotFound().json(err("not_found", format!("Job {} not found", job_id))),
+        Err(e) => {
+            eprintln!("[soal_quality_controller] reverify status error: {:?}", e);
+            return HttpResponse::InternalServerError().json(err("db_error", "Failed to fetch job status."));
+        }
+    };
+
+    let results: Vec<ReverifyOutcome> = job
+        .results_json
+        .as_deref()
+        .and_then(|s| serde_json::from_str(s).ok())
+        .unwrap_or_default();
+
+    HttpResponse::Ok().json(ReverifyStatusResponse {
+        job_id,
+        status: job.status,
+        total: job.total,
+        processed: job.processed,
+        applied: job.applied,
+        needs_review: job.needs_review,
+        confirmed_ok: job.confirmed_ok,
+        failed: job.failed_count,
+        results,
+        error_message: job.error_message,
+        completed_at: job.completed_at.map(|t| t.to_rfc3339()),
+    })
+}
+
 pub fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/admin/soal-quality")
@@ -652,7 +1083,10 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(fix_merged_options)
             .service(get_fix_job)
             .service(list_missing_context)
-            .service(list_unverified_answers),
+            .service(list_unverified_answers)
+            // Static path before the {job_id} param route.
+            .service(start_reverify)
+            .service(get_reverify_job),
     );
 }
 
