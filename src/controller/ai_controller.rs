@@ -815,7 +815,12 @@ async fn enrich_single_for_job(
     )
     .await;
 
-    let ctx = build_soal_context(&soal, fields.to_vec(), materi_context);
+    // Reading/listening/figural soal carry their actual content in the
+    // shared passage, not the stem (stems there run 35-115 chars) -- without
+    // it the model would be answering a question it can't see.
+    let passage = fetch_passage(pool, soal.passage_id).await;
+
+    let ctx = build_soal_context(&soal, fields.to_vec(), materi_context, passage);
 
     let enriched = match ai_service.enrich_question(&ctx).await {
         Ok(e) => e,
@@ -979,6 +984,17 @@ async fn fetch_soal(pool: &MySqlPool, question_id: i64) -> Result<Option<AdminSo
     .bind(question_id)
     .fetch_optional(pool)
     .await
+}
+
+/// Fetches a soal's shared passage text, when it has one.
+async fn fetch_passage(pool: &MySqlPool, passage_id: Option<i32>) -> Option<String> {
+    let pid = passage_id?;
+    sqlx::query_scalar::<_, String>("SELECT content FROM dbquizapp.passages WHERE id = ?")
+        .bind(pid)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
 }
 
 /// Insert a row into ai_usage_logs.
@@ -1187,7 +1203,12 @@ fn resolve_fields(requested: &[String]) -> Vec<String> {
     }
 }
 
-fn build_soal_context(soal: &AdminSoal, fields: Vec<String>, materi_context: Option<String>) -> SoalContext {
+fn build_soal_context(
+    soal: &AdminSoal,
+    fields: Vec<String>,
+    materi_context: Option<String>,
+    passage: Option<String>,
+) -> SoalContext {
     SoalContext {
         id: soal.id as i64,
         soal: soal.soal.clone(),
@@ -1198,6 +1219,7 @@ fn build_soal_context(soal: &AdminSoal, fields: Vec<String>, materi_context: Opt
         opt5: soal.opt5.clone(),
         correct_answer: soal.correct_answer.clone(),
         fields_to_enrich: fields,
+        passage,
         materi_context,
     }
 }

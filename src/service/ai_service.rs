@@ -52,6 +52,11 @@ pub struct SoalContext {
     pub correct_answer: Option<String>,
     /// Field mana yang diminta: ["solution", "tag", "modul", "pelajaran"]
     pub fields_to_enrich: Vec<String>,
+    /// Bacaan/stimulus bersama dari tabel `passages`, kalau soal ini
+    /// punya passage_id. Buat soal tipe reading/listening/figural,
+    /// pertanyaannya sendiri pendek (35-115 karakter) karena isi
+    /// sebenarnya ada di passage -- tanpa ini AI cuma bisa menebak.
+    pub passage: Option<String>,
     /// Materi referensi dari materi_library (RAG grounding), kalau ada
     /// yang cocok dengan subcategory_id/topic_id soal ini. Tanpa ini, AI
     /// cuma jawab dari pengetahuan umumnya -- generik dan bisa salah di
@@ -432,8 +437,15 @@ impl AiService {
             None => String::new(),
         };
 
+        // Passage goes AFTER materi but BEFORE the question -- it's the
+        // stimulus the question is asking about, not background reference.
+        let passage_block = match &soal.passage {
+            Some(p) if !p.trim().is_empty() => format!("BACAAN/STIMULUS:\n{}\n\n", p),
+            _ => String::new(),
+        };
+
         let user = format!(
-            "{materi_block}Soal:\n{soal_text}\n\n\
+            "{materi_block}{passage_block}Soal:\n{soal_text}\n\n\
              Pilihan jawaban:\n{options}\n\
              {answer_line}Isi field berikut untuk soal di atas, balas sebagai objek JSON tunggal:\n\
              {field_instructions}",
@@ -937,6 +949,7 @@ mod tests {
             opt5: None,
             correct_answer: Some("B".to_string()),
             fields_to_enrich: vec!["solution".to_string(), "tag".to_string()],
+            passage: None,
             materi_context: None,
         }
     }

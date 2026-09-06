@@ -837,9 +837,9 @@ async fn run_reverify_job(
     let (mut applied, mut needs_review, mut confirmed_ok, mut failed) = (0i32, 0i32, 0i32, 0i32);
 
     for (i, qid) in ids.iter().enumerate() {
-        let soal = match sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>)>(
+        let soal = match sqlx::query_as::<_, (i64, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<i32>)>(
             r#"
-            SELECT id, soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, subcategory_id
+            SELECT id, soal, opt1, opt2, opt3, opt4, opt5, correct_answer, solution, subcategory_id, passage_id
             FROM dbquizapp.soal WHERE id = ?
             "#,
         )
@@ -862,7 +862,7 @@ async fn run_reverify_job(
                 continue;
             }
         };
-        let (_, soal_text, o1, o2, o3, o4, o5, stored_answer, old_solution, subcategory_id) = soal;
+        let (_, soal_text, o1, o2, o3, o4, o5, stored_answer, old_solution, subcategory_id, passage_id) = soal;
 
         let note_proposed = old_solution
             .as_deref()
@@ -878,6 +878,20 @@ async fn run_reverify_job(
 
         // correct_answer is requested explicitly so build_prompt re-derives
         // it instead of taking the stored (suspect) key as given.
+        // Same reason as ai_controller: KLC-style soal keep their real
+        // content in the shared passage, not the stem.
+        let passage = match passage_id {
+            Some(pid) => sqlx::query_scalar::<_, String>(
+                "SELECT content FROM dbquizapp.passages WHERE id = ?",
+            )
+            .bind(pid)
+            .fetch_optional(&*pool)
+            .await
+            .ok()
+            .flatten(),
+            None => None,
+        };
+
         let ctx = crate::service::ai_service::SoalContext {
             id: *qid,
             soal: soal_text,
@@ -888,6 +902,7 @@ async fn run_reverify_job(
             opt5: o5,
             correct_answer: stored_answer.clone(),
             fields_to_enrich: vec!["correct_answer".to_string(), "solution".to_string()],
+            passage,
             materi_context,
         };
 
