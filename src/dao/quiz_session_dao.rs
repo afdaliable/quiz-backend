@@ -618,7 +618,7 @@ impl<'c> Table<'c, QuizSession> {
         let rows = q.fetch_all(&*self.pool).await?;
 
         // Build map id → (correct_answer, question_type, option_scores)
-        let soal_map: HashMap<i32, (String, String, Option<serde_json::Value>)> = rows
+        let soal_map: HashMap<i32, (Option<String>, String, Option<serde_json::Value>)> = rows
             .into_iter()
             .filter_map(|row| {
                 let id: i32 = row.get("id");
@@ -630,7 +630,7 @@ impl<'c> Table<'c, QuizSession> {
                     .ok()
                     .flatten()
                     .and_then(|s| serde_json::from_str(&s).ok());
-                Some((id, (ca.unwrap_or_default(), qt, os)))
+                Some((id, (ca, qt, os)))
             })
             .collect();
 
@@ -644,9 +644,17 @@ impl<'c> Table<'c, QuizSession> {
                 .get(index)
                 .and_then(|a| *a);
 
-            max_score += 5;
-
             if let Some((correct_answer, question_type, option_scores)) = soal_map.get(qid) {
+                // A soal with no answer key can't be scored either way.
+                // Counting it wrong would penalise the user for our own
+                // data gap (332 scraped soal had a placeholder key that is
+                // now honestly NULL), so it's excluded from max_score too.
+                let is_tkp = question_type == "tkp";
+                let correct_answer = correct_answer.as_deref().filter(|c| !c.is_empty());
+                if correct_answer.is_none() && !is_tkp {
+                    continue;
+                }
+                max_score += 5;
 
                 let Some(ans_idx) = user_answer_idx else {
                     continue; // unanswered — contributes 0
@@ -666,7 +674,7 @@ impl<'c> Table<'c, QuizSession> {
                     raw_score += poin;
                     correct_count += 1; // any answered TKP = correct (no concept of "wrong" in TKP)
                 } else {
-                    if opt_key == correct_answer.as_str() {
+                    if Some(opt_key) == correct_answer {
                         raw_score += 5;
                         correct_count += 1;
                     } else {
@@ -713,7 +721,10 @@ impl<'c> Table<'c, QuizSession> {
         let mut incorrect_count = 0i32;
 
         for (index, row) in paket_response.iter().enumerate() {
-            let correct_answer: String = row.get("correct_answer");
+            // Was `let correct_answer: String = row.get(...)`, which panics
+            // outright on a NULL key -- and NULL is now a legitimate state
+            // ("answer not known yet") rather than an impossible one.
+            let correct_answer: Option<String> = row.try_get("correct_answer").unwrap_or(None);
             let question_type: String = row.try_get("question_type")
                 .unwrap_or_else(|_| "multiple_choice".to_string());
             let option_scores: Option<serde_json::Value> = row
@@ -722,6 +733,14 @@ impl<'c> Table<'c, QuizSession> {
                 .flatten()
                 .and_then(|s| serde_json::from_str(&s).ok());
 
+            // Same rule as calculate_score_by_ids: a soal with no answer
+            // key isn't scoreable, so it's excluded rather than counted
+            // against the user.
+            let is_tkp = question_type == "tkp";
+            let correct_answer = correct_answer.as_deref().filter(|c| !c.is_empty());
+            if correct_answer.is_none() && !is_tkp {
+                continue;
+            }
             max_score += 5;
 
             let Some(user_answer_idx) = user_answers.get(index).and_then(|a| *a) else {
@@ -742,7 +761,7 @@ impl<'c> Table<'c, QuizSession> {
                 raw_score += poin;
                 correct_count += 1; // any answered TKP = correct (no concept of "wrong" in TKP)
             } else {
-                if opt_key == correct_answer.as_str() {
+                if Some(opt_key) == correct_answer {
                     raw_score += 5;
                     correct_count += 1;
                 } else {
