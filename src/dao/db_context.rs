@@ -94,9 +94,6 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             FROM paket_soal ps
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
-            -- Unpublished packages must not reach the quiz app; see
-            -- migration 20260907_paket_soal_is_published.
-            WHERE ps.is_published = TRUE
             GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, ps.is_premium
             "#,
         )
@@ -118,9 +115,6 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
             LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
-            -- Unpublished packages must not reach the quiz app; see
-            -- migration 20260907_paket_soal_is_published.
-            WHERE ps.is_published = TRUE
             GROUP BY ps.id, ps.nama_paket_soal, ks.id, ks.nama_kategori, hp.koin, hp.harga, hp.is_free, ps.is_premium
             "#,
         )
@@ -139,7 +133,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             JOIN paket_soal ps ON ks.id = ps.kategori_id
             JOIN paket_soal_items psi ON psi.paket_soal_id = ps.id
             JOIN soal s ON psi.soal_id = s.id
-            WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ? AND ps.is_published = TRUE
+            WHERE ks.nama_kategori = ? AND ps.nama_paket_soal = ?
             "#;
         
         eprintln!("🔍 [DEBUG] Executing SQL: {}", query);
@@ -237,9 +231,6 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
             JOIN kategori_soal ks ON ps.kategori_id = ks.id
             LEFT JOIN paket_soal_items psi ON ps.id = psi.paket_soal_id
             LEFT JOIN harga_paket hp ON ps.id = hp.id_paket_soal
-            -- Unpublished packages must not reach the quiz app; see
-            -- migration 20260907_paket_soal_is_published.
-            WHERE ps.is_published = TRUE
         "#;
 
         if categories.is_empty() {
@@ -256,7 +247,7 @@ impl<'c> JoinTable<'c, KategoriSoal, PaketSoal, PaketSoalItem, Soal> {
 
         let placeholders = categories.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
         let query_str = format!(
-            "{} AND ks.nama_kategori IN ({}) \
+            "{} WHERE ks.nama_kategori IN ({}) \
              GROUP BY ps.id, ps.nama_paket_soal, ks.nama_kategori, hp.is_free, ps.is_premium \
              ORDER BY is_free DESC, question_count DESC LIMIT 5",
             base_select, placeholders
