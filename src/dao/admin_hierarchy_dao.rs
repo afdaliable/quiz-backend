@@ -27,20 +27,32 @@ impl AdminHierarchyDao {
     // ── Tracks ────────────────────────────────────────────────────────────────
 
     pub async fn get_tracks(&self) -> Result<Vec<ExamTrack>, sqlx::Error> {
-        // AFD-226: count includes direct FK + questions via question_topics M2M
+        // AFD-226: count includes direct FK + questions via question_topics M2M.
+        //
+        // Was a correlated subquery per track whose `s.track_id = t.id OR
+        // s.id IN (...)` defeated index use, so every track near-full-scanned
+        // the 54k-row soal table -- confirmed live at 4.4s for ten tracks.
+        // Same bug class as the old hierarchy/topics query. Counting both
+        // sources once in a UNION and grouping, then joining that back, gives
+        // byte-identical counts in 0.33s.
         sqlx::query_as::<_, ExamTrack>(r#"
             SELECT t.id, t.slug, t.name, t.icon, t.status, t.sort_order,
-                   (SELECT COUNT(DISTINCT s.id) FROM soal s
-                    WHERE s.track_id = t.id
-                       OR s.id IN (
-                           SELECT qt.question_id FROM question_topics qt
-                           JOIN topics tp ON tp.id = qt.topic_id
-                           JOIN subcategories sc ON sc.id = tp.subcategory_id
-                           JOIN categories c ON c.id = sc.category_id
-                           WHERE c.track_id = t.id
-                       )
-                   ) AS question_count
+                   COALESCE(x.question_count, 0) AS question_count
             FROM exam_tracks t
+            LEFT JOIN (
+                SELECT track_id, COUNT(DISTINCT sid) AS question_count
+                FROM (
+                    SELECT s.track_id AS track_id, s.id AS sid
+                    FROM soal s WHERE s.track_id IS NOT NULL
+                    UNION
+                    SELECT c.track_id, qt.question_id
+                    FROM question_topics qt
+                    JOIN topics tp ON tp.id = qt.topic_id
+                    JOIN subcategories sc ON sc.id = tp.subcategory_id
+                    JOIN categories c ON c.id = sc.category_id
+                ) u
+                GROUP BY track_id
+            ) x ON x.track_id = t.id
             ORDER BY t.sort_order
         "#)
         .fetch_all(&*self.pool)

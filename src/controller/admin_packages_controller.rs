@@ -48,6 +48,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(get_package_by_id)
             .service(update_package)
             .service(delete_package)
+            .service(duplicate_package)
             .service(get_package_questions)
             .service(add_questions_to_package)
             .service(remove_question_from_package)
@@ -286,6 +287,130 @@ async fn create_package(
             println!("Error creating package: {:?}", e);
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Failed to create package".to_string(),
+            })
+        }
+    }
+}
+
+/// Duplicate a package, including its question mapping.
+///
+/// The admin UI has had a "duplicate" button wired to this path for a
+/// while but no handler existed -- confirmed live, it returned 404. The
+/// copy is created unpublished-by-default in the sense that it carries a
+/// distinct name; question links are copied so the new package is
+/// immediately usable rather than an empty shell.
+#[utoipa::path(
+    post,
+    path = "/admin/packages/{id}/duplicate",
+    params(("id" = i32, Path, description = "Package ID to duplicate")),
+    responses(
+        (status = 201, description = "Package duplicated", body = AdminPaketSoal),
+        (status = 404, description = "Source package not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("bearer_auth" = []))
+)]
+#[post("/{id}/duplicate")]
+async fn duplicate_package(
+    path: web::Path<i32>,
+    data: web::Data<AppState<'_>>,
+) -> impl Responder {
+    let source_id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    let source = match sqlx::query_as::<_, (String, Option<i32>, bool)>(
+        "SELECT nama_paket_soal, kategori_id, is_premium FROM dbquizapp.paket_soal WHERE id = ?",
+    )
+    .bind(source_id)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return HttpResponse::NotFound().json(ErrorResponse {
+                error: "Package not found".to_string(),
+            })
+        }
+        Err(e) => {
+            println!("Error fetching package to duplicate: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to fetch source package".to_string(),
+            });
+        }
+    };
+    let (name, kategori_id, is_premium) = source;
+
+    // Name must stay unique-ish for humans scanning the list; a bare
+    // "(copy)" collides the moment you duplicate twice.
+    let new_name = {
+        let base = format!("{} (copy)", name);
+        let taken = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM dbquizapp.paket_soal WHERE nama_paket_soal = ?",
+        )
+        .bind(&base)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+        if taken == 0 {
+            base
+        } else {
+            format!("{} (copy {})", name, chrono::Utc::now().format("%H%M%S"))
+        }
+    };
+
+    let insert = sqlx::query(
+        r#"
+        INSERT INTO dbquizapp.paket_soal (nama_paket_soal, kategori_id, is_premium, created_at, updated_at)
+        VALUES (?, ?, ?, NOW(), NOW())
+        "#,
+    )
+    .bind(&new_name)
+    .bind(kategori_id)
+    .bind(is_premium)
+    .execute(pool)
+    .await;
+
+    let new_id = match insert {
+        Ok(r) => r.last_insert_id() as i32,
+        Err(e) => {
+            println!("Error inserting duplicated package: {:?}", e);
+            return HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to create duplicate".to_string(),
+            });
+        }
+    };
+
+    // Copy the question mapping in one statement rather than row-by-row.
+    if let Err(e) = sqlx::query(
+        r#"
+        INSERT INTO dbquizapp.paket_soal_items (paket_soal_id, soal_id)
+        SELECT ?, soal_id FROM dbquizapp.paket_soal_items WHERE paket_soal_id = ?
+        "#,
+    )
+    .bind(new_id)
+    .bind(source_id)
+    .execute(pool)
+    .await
+    {
+        println!("Error copying package items: {:?}", e);
+        // The package itself exists; report rather than silently returning
+        // a copy that is missing its questions.
+        return HttpResponse::InternalServerError().json(ErrorResponse {
+            error: "Package duplicated but copying its questions failed".to_string(),
+        });
+    }
+
+    if let Some(redis_pool) = &data.redis_pool {
+        let mut con = redis_pool.quiz_cache().as_ref().clone();
+        let _ = RedisService::invalidate_package_caches(&mut con).await;
+    }
+
+    match get_package_by_id_internal(&data, new_id).await {
+        Ok(pkg) => HttpResponse::Created().json(pkg),
+        Err(e) => {
+            println!("Error fetching duplicated package: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Package duplicated but failed to fetch details".to_string(),
             })
         }
     }
