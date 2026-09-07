@@ -49,6 +49,7 @@ pub fn init(cfg: &mut web::ServiceConfig) {
             .service(update_package)
             .service(delete_package)
             .service(duplicate_package)
+            .service(toggle_package_published)
             .service(get_package_questions)
             .service(add_questions_to_package)
             .service(remove_question_from_package)
@@ -287,6 +288,71 @@ async fn create_package(
             println!("Error creating package: {:?}", e);
             HttpResponse::InternalServerError().json(ErrorResponse {
                 error: "Failed to create package".to_string(),
+            })
+        }
+    }
+}
+
+/// Flip a package between visible and hidden in the quiz app.
+///
+/// Until now visibility was decided by accident: the public listing
+/// queries INNER JOIN kategori_soal, so a package with no category
+/// silently vanished from app.nagih.id -- conflating "not categorised
+/// yet" with "not meant to be published". `is_published` makes the
+/// intent explicit, and the public queries in db_context now filter on it.
+///
+/// Redis caches the package listings for an hour, so the caches are
+/// invalidated here; without that an admin would unpublish a package and
+/// still see it live for up to an hour.
+#[utoipa::path(
+    post,
+    path = "/admin/packages/{id}/toggle-published",
+    params(("id" = i32, Path, description = "Package ID")),
+    responses(
+        (status = 200, description = "Publish state toggled", body = AdminPaketSoal),
+        (status = 404, description = "Package not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(("bearer_auth" = []))
+)]
+#[post("/{id}/toggle-published")]
+async fn toggle_package_published(
+    path: web::Path<i32>,
+    data: web::Data<AppState<'_>>,
+) -> impl Responder {
+    let id = path.into_inner();
+    let pool = &*data.context.soal.pool;
+
+    let result = sqlx::query(
+        "UPDATE dbquizapp.paket_soal SET is_published = NOT is_published, updated_at = NOW() WHERE id = ?",
+    )
+    .bind(id)
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(r) if r.rows_affected() > 0 => {
+            if let Some(redis_pool) = &data.redis_pool {
+                let mut con = redis_pool.quiz_cache().as_ref().clone();
+                let _ = RedisService::invalidate_package_caches(&mut con).await;
+            }
+            match get_package_by_id_internal(&data, id).await {
+                Ok(pkg) => HttpResponse::Ok().json(pkg),
+                Err(e) => {
+                    println!("Error fetching package after toggle: {:?}", e);
+                    HttpResponse::InternalServerError().json(ErrorResponse {
+                        error: "Publish state toggled but failed to fetch package".to_string(),
+                    })
+                }
+            }
+        }
+        Ok(_) => HttpResponse::NotFound().json(ErrorResponse {
+            error: "Package not found".to_string(),
+        }),
+        Err(e) => {
+            println!("Error toggling publish state: {:?}", e);
+            HttpResponse::InternalServerError().json(ErrorResponse {
+                error: "Failed to toggle publish state".to_string(),
             })
         }
     }
