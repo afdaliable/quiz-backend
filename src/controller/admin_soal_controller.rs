@@ -140,12 +140,29 @@ async fn search_questions(
         where_conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)");
         bind_values.push(track_slug.clone());
     }
+    // Category/subcategory match the direct FK OR the question_topics M2M,
+    // same as the topic filter below. FK-only hid most mapped soal: UPKP
+    // showed 118 of 1427, since soal shared with another exam (e.g. SKD TWK)
+    // keep that exam in category_id and reach UPKP only through topics.
     if let Some(ref cat_slug) = query.category {
-        where_conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)");
+        where_conditions.push(
+            "(EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?) \
+             OR EXISTS (SELECT 1 FROM question_topics qt JOIN topics tp ON tp.id = qt.topic_id \
+                        JOIN subcategories sc ON sc.id = tp.subcategory_id \
+                        JOIN categories c ON c.id = sc.category_id \
+                        WHERE qt.question_id = s.id AND c.slug = ?))"
+        );
+        bind_values.push(cat_slug.clone());
         bind_values.push(cat_slug.clone());
     }
     if let Some(ref sub_slug) = query.subcategory {
-        where_conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)");
+        where_conditions.push(
+            "(EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?) \
+             OR EXISTS (SELECT 1 FROM question_topics qt JOIN topics tp ON tp.id = qt.topic_id \
+                        JOIN subcategories sc ON sc.id = tp.subcategory_id \
+                        WHERE qt.question_id = s.id AND sc.slug = ?))"
+        );
+        bind_values.push(sub_slug.clone());
         bind_values.push(sub_slug.clone());
     }
     if let Some(ref top_slug) = query.topic {
