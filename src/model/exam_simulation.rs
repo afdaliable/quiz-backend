@@ -83,6 +83,11 @@ pub struct CreateExamSimulationRequest {
     pub is_premium: bool,
     #[serde(default)]
     pub max_attempts: i32,
+    /// Which product lists this simulasi, e.g. "skd", "lpdp", "upkp". Apps
+    /// filter GET /simulasi-ujian on it, so a simulasi without one shows up
+    /// in none of them.
+    #[serde(default)]
+    pub exam_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -98,6 +103,7 @@ pub struct UpdateExamSimulationRequest {
     pub is_premium: Option<bool>,
     pub max_attempts: Option<i32>,
     pub is_active: Option<bool>,
+    pub exam_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -98,8 +98,8 @@ impl ExamSimulationDao {
         let result = sqlx::query(r#"
             INSERT INTO exam_simulations
                 (nama_simulasi, deskripsi, paket_soal_id, generation_mode, generation_config,
-                 duration_minutes, total_questions, passing_score, is_premium, max_attempts, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                 duration_minutes, total_questions, passing_score, is_premium, max_attempts, exam_type, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
         "#)
         .bind(&req.nama_simulasi)
         .bind(&req.deskripsi)
@@ -111,6 +111,7 @@ impl ExamSimulationDao {
         .bind(req.passing_score)
         .bind(req.is_premium)
         .bind(req.max_attempts)
+        .bind(&req.exam_type)
         .execute(&*self.pool).await?;
         Ok(result.last_insert_id() as i32)
     }
@@ -129,6 +130,7 @@ impl ExamSimulationDao {
         if req.is_premium.is_some()        { sets.push("is_premium = ?"); }
         if req.max_attempts.is_some()      { sets.push("max_attempts = ?"); }
         if req.is_active.is_some()         { sets.push("is_active = ?"); }
+        if req.exam_type.is_some()         { sets.push("exam_type = ?"); }
         if sets.is_empty() { return Ok(()); }
 
         let sql = format!("UPDATE exam_simulations SET {} WHERE id = ?", sets.join(", "));
@@ -144,6 +146,7 @@ impl ExamSimulationDao {
         if let Some(v) = &req.is_premium        { q = q.bind(v); }
         if let Some(v) = &req.max_attempts      { q = q.bind(v); }
         if let Some(v) = &req.is_active         { q = q.bind(v); }
+        if let Some(v) = &req.exam_type         { q = q.bind(v); }
         q = q.bind(id);
         q.execute(&*self.pool).await?;
         Ok(())
