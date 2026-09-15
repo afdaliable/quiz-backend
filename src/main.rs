@@ -206,6 +206,7 @@ async fn main() -> std::io::Result<()> {
             .configure(quiz_backend::controller::question_feedback_controller::configure_routes)
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
+            .configure(quiz_backend::controller::soal_pool_controller::configure_routes)
             .service(
                 afiles::Files::new("/static/soal-images", soal_images_dir.clone())
                     .use_last_modified(true)

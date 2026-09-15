@@ -74,9 +74,24 @@ impl<'c> Table<'c, QuizSession> {
         request: &StartRandomSessionRequest,
     ) -> Result<StartRandomSessionResponse, Error> {
         let count = request.count as usize;
-        let kategori = request.category.as_deref().unwrap_or("Semua Kategori");
+        let kategori = request
+            .category_slug
+            .as_deref()
+            .or(request.category.as_deref())
+            .unwrap_or("Semua Kategori");
         let total_time = (count as i32) * 60;
 
+        // Taxonomy pool: already random and servable-filtered, and free for
+        // every logged-in user for now (no paket, so no premium_quiz_access).
+        let selected_ids: Vec<i32> = if let Some(slug) = request.category_slug.as_deref() {
+            let ids = crate::dao::soal_pool_dao::sample_ids(
+                &self.pool, slug, None, request.topic.as_deref(), request.count,
+            ).await?;
+            if ids.is_empty() {
+                return Err(Error::RowNotFound);
+            }
+            ids
+        } else {
         // Step 1: ambil semua soal ID yang bisa diakses user (memperhatikan premium access)
         let accessible_ids: Vec<i32> = match &request.category {
             Some(cat) => {
@@ -138,7 +153,8 @@ impl<'c> Table<'c, QuizSession> {
         let mut ids = accessible_ids;
         let mut rng = rand::thread_rng();
         ids.shuffle(&mut rng);
-        let selected_ids: Vec<i32> = ids.into_iter().take(count).collect();
+        ids.into_iter().take(count).collect()
+        };
 
         // Step 3: fetch question content untuk selected_ids
         let placeholders = selected_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");

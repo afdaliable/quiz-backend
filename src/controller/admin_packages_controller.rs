@@ -1381,12 +1381,23 @@ async fn fetch_candidates_full(
         conditions.push("EXISTS (SELECT 1 FROM exam_tracks et WHERE et.id = s.track_id AND et.slug = ?)".to_string());
         binds.push(ts.to_string());
     }
+    // Category/subcategory match the direct FK OR the question_topics M2M, like
+    // the topic filter below -- soal shared with another exam keep that exam in
+    // category_id and reach this category only through topics.
     if let Some(cs) = category_slug {
-        conditions.push("EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?)".to_string());
+        conditions.push("(EXISTS (SELECT 1 FROM categories c WHERE c.id = s.category_id AND c.slug = ?) \
+            OR EXISTS (SELECT 1 FROM question_topics qt JOIN topics tp ON tp.id = qt.topic_id \
+                       JOIN subcategories sc ON sc.id = tp.subcategory_id JOIN categories c ON c.id = sc.category_id \
+                       WHERE qt.question_id = s.id AND c.slug = ?))".to_string());
+        binds.push(cs.to_string());
         binds.push(cs.to_string());
     }
     if let Some(ss) = subcategory_slug {
-        conditions.push("EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?)".to_string());
+        conditions.push("(EXISTS (SELECT 1 FROM subcategories sc WHERE sc.id = s.subcategory_id AND sc.slug = ?) \
+            OR EXISTS (SELECT 1 FROM question_topics qt JOIN topics tp ON tp.id = qt.topic_id \
+                       JOIN subcategories sc ON sc.id = tp.subcategory_id \
+                       WHERE qt.question_id = s.id AND sc.slug = ?))".to_string());
+        binds.push(ss.to_string());
         binds.push(ss.to_string());
     }
     // UUID-based filters (FK columns, direct match)
@@ -1395,11 +1406,16 @@ async fn fetch_candidates_full(
         binds.push(tid.to_string());
     }
     if let Some(cid) = tax.category_id {
-        conditions.push("s.category_id = ?".to_string());
+        conditions.push("(s.category_id = ? OR EXISTS (SELECT 1 FROM question_topics qt \
+            JOIN topics tp ON tp.id = qt.topic_id JOIN subcategories sc ON sc.id = tp.subcategory_id \
+            WHERE qt.question_id = s.id AND sc.category_id = ?))".to_string());
+        binds.push(cid.to_string());
         binds.push(cid.to_string());
     }
     if let Some(scid) = tax.subcategory_id {
-        conditions.push("s.subcategory_id = ?".to_string());
+        conditions.push("(s.subcategory_id = ? OR EXISTS (SELECT 1 FROM question_topics qt \
+            JOIN topics tp ON tp.id = qt.topic_id WHERE qt.question_id = s.id AND tp.subcategory_id = ?))".to_string());
+        binds.push(scid.to_string());
         binds.push(scid.to_string());
     }
     // Topics: union of single `topic_id` + multi `topic_ids`. A soal matches if its

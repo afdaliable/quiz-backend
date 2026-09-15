@@ -5,6 +5,9 @@ use crate::model::exam_simulation::ExamSimulation;
 
 /// Generation modes recognized by `generate_questions_for_simulasi`.
 pub const MODE_PAKET: &str = "paket";
+/// Scored soal need a key; TKP is scored from option_scores instead. Soal whose
+/// key was never scraped sit at NULL until someone fills it in.
+const ANSWERABLE: &str = "(s.correct_answer IS NOT NULL OR s.question_type = 'tkp')";
 pub const MODE_SUBCATEGORY: &str = "subcategory_composition";
 pub const MODE_TOPIC: &str = "topic_composition";
 pub const MODE_RANDOM_POOL: &str = "random_pool";
@@ -67,6 +70,10 @@ async fn from_composition(
         .and_then(|v| v.as_array())
         .ok_or("generation_config.compositions must be an array")?;
 
+    // Products whose quiz UI can't show a reading passage (UPKP) opt out of
+    // passage soal; everyone else keeps them.
+    let exclude_passages = cfg.get("exclude_passages").and_then(|v| v.as_bool()).unwrap_or(false);
+
     let mut rng = rand::thread_rng();
     let mut all_ids: Vec<i32> = Vec::with_capacity(sim.total_questions as usize);
 
@@ -81,7 +88,13 @@ async fn from_composition(
 
         for (difficulty, bucket_count) in buckets {
             if bucket_count == 0 { continue; }
-            let candidates = fetch_by_node(pool, mode_kind, node_id, &difficulty).await?;
+            // A soal mapped to two nodes of the same composition must not
+            // appear twice in one attempt.
+            let candidates: Vec<i32> = fetch_by_node(pool, mode_kind, node_id, &difficulty, exclude_passages)
+                .await?
+                .into_iter()
+                .filter(|id| !all_ids.contains(id))
+                .collect();
             if candidates.len() < bucket_count {
                 return Err(format!(
                     "Not enough {} questions for node {} (need {}, found {})",
@@ -109,21 +122,20 @@ async fn fetch_by_node(
     mode_kind: &str,
     node_id: &str,
     difficulty: &str,
+    exclude_passages: bool,
 ) -> Result<Vec<i32>, String> {
-    let sql = match mode_kind {
-        "subcategory_id" => r#"
-            SELECT s.id FROM soal s
-            WHERE s.status = 'active' AND s.subcategory_id = ? AND s.difficulty_est = ?
-        "#,
-        "question_topics_join" => r#"
-            SELECT s.id FROM soal s
-            JOIN question_topics qt ON qt.question_id = s.id
-            WHERE s.status = 'active' AND qt.topic_id = ? AND s.difficulty_est = ?
-        "#,
+    let node_filter = match mode_kind {
+        "subcategory_id" => "s.subcategory_id = ?",
+        "question_topics_join" => "EXISTS (SELECT 1 FROM question_topics qt WHERE qt.question_id = s.id AND qt.topic_id = ?)",
         _ => return Err(format!("Unknown mode_kind: {}", mode_kind)),
     };
+    let sql = format!(
+        "SELECT s.id FROM soal s WHERE s.status = 'active' AND {ANSWERABLE} AND {node_filter} \
+         AND s.difficulty_est = ?{}",
+        if exclude_passages { " AND s.passage_id IS NULL" } else { "" }
+    );
 
-    sqlx::query_scalar::<_, i32>(sql)
+    sqlx::query_scalar::<_, i32>(&sql)
         .bind(node_id)
         .bind(difficulty)
         .fetch_all(pool).await
@@ -145,7 +157,7 @@ async fn from_random_pool(pool: &MySqlPool, sim: &ExamSimulation) -> Result<Vec<
     for (difficulty, count) in buckets {
         if count == 0 { continue; }
 
-        let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", "s.difficulty_est = ?"];
+        let mut conditions: Vec<&'static str> = vec!["s.status = 'active'", ANSWERABLE, "s.difficulty_est = ?"];
         let mut binds: Vec<String> = vec![difficulty.clone()];
 
         if let Some(t) = track_id {

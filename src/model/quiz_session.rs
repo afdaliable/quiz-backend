@@ -72,6 +72,13 @@ pub struct CreateQuizSessionRequest {
 pub struct StartRandomSessionRequest {
     pub count: u32,               // hanya 10 | 20 | 30
     pub category: Option<String>, // filter by kategori_soal, None = semua
+    /// Taxonomy pool instead of paket membership (see dao::soal_pool_dao).
+    /// When set, `category` is ignored.
+    #[serde(default)]
+    pub category_slug: Option<String>,
+    /// Topic name within `category_slug`; only used together with it.
+    #[serde(default)]
+    pub topic: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
