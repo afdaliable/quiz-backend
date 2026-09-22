@@ -14,6 +14,9 @@ pub struct PaketSoal {
     pub kategori_nama: Option<String>,
     pub is_premium: bool,
     pub jumlah_soal: Option<i64>,
+    /// Whether the quiz app may show this paket. Defaults to true for the
+    /// queries that don't select it, matching the column's own default.
+    pub is_published: bool,
 }
 
 impl<'c> FromRow<'c, MySqlRow> for PaketSoal {
@@ -25,6 +28,7 @@ impl<'c> FromRow<'c, MySqlRow> for PaketSoal {
             kategori_nama: row.try_get("kategori_nama").ok(),
             is_premium: row.get("is_premium"),
             jumlah_soal: row.try_get("jumlah_soal").ok(),
+            is_published: row.try_get("is_published").unwrap_or(true),
         })
     }
 }
@@ -38,6 +42,8 @@ pub struct AdminPaketSoal {
     pub kategori_name: Option<String>,
     pub is_premium: bool,
     pub questions_count: i64,
+    pub is_published: bool,
+    /// "published" / "draft", derived from is_published.
     pub status: String,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
@@ -52,6 +58,7 @@ impl<'c> FromRow<'c, MySqlRow> for AdminPaketSoal {
             kategori_name: row.try_get("kategori_name").ok(),
             is_premium: row.get("is_premium"),
             questions_count: row.get("questions_count"),
+            is_published: row.try_get("is_published").unwrap_or(true),
             status: row.get("status"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),

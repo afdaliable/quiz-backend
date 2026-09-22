@@ -144,11 +144,11 @@ async fn get_all_packages(
             p.id, p.nama_paket_soal, p.kategori_id, p.is_premium,
             k.nama_kategori as kategori_name,
             COALESCE(question_count.count, 0) as questions_count,
-            CASE 
-                WHEN p.status = 1 THEN 'published'
-                WHEN p.status = 0 THEN 'draft'
-                ELSE 'draft'
-            END as status,
+            p.is_published,
+            -- paket_soal.status (int) is NULL on every row and referenced
+            -- nowhere else, so it always read 'draft'. is_published is the
+            -- real flag the quiz app filters on.
+            CASE WHEN p.is_published THEN 'published' ELSE 'draft' END as status,
             NOW() as created_at,
             NOW() as updated_at
         FROM dbquizapp.paket_soal p
@@ -2244,13 +2244,14 @@ async fn get_package_by_id_internal(
             ps.nama_paket_soal, 
             ps.kategori_id, 
             ps.is_premium,
+            ps.is_published,
             ks.nama_kategori as kategori_nama,
             COUNT(psi.soal_id) as jumlah_soal
         FROM dbquizapp.paket_soal ps
         LEFT JOIN dbquizapp.kategori_soal ks ON ps.kategori_id = ks.id
         LEFT JOIN dbquizapp.paket_soal_items psi ON ps.id = psi.paket_soal_id
         WHERE ps.id = ?
-        GROUP BY ps.id, ps.nama_paket_soal, ps.kategori_id, ps.is_premium, ks.nama_kategori
+        GROUP BY ps.id, ps.nama_paket_soal, ps.kategori_id, ps.is_premium, ps.is_published, ks.nama_kategori
         "#
     )
     .bind(package_id)
