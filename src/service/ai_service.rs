@@ -248,12 +248,27 @@ pub struct AiService {
     max_tokens: u32,
 }
 
+/// Floor for the HTTP timeout, whatever a deployment's config.json says.
+/// Generating a batch of soal from a long materi is one request that streams
+/// for minutes -- 20 soal measured ~127s against 9router, and a complex materi
+/// with more soal runs longer. A 120-180s timeout cuts those off mid-answer and
+/// reports it as "Request timed out", losing work the model had nearly
+/// finished. Short calls are unaffected: they return when they return.
+const MIN_AI_TIMEOUT_SECS: u64 = 900;
+
 impl AiService {
     /// Buat AiService dari config. Returns None jika section `ai` tidak ada di config.json.
     pub fn from_config(config: &Config) -> Option<Self> {
         let ai_cfg = config.get_ai_config()?;
 
-        let timeout = Duration::from_secs(ai_cfg.timeout_secs);
+        let timeout_secs = ai_cfg.timeout_secs.max(MIN_AI_TIMEOUT_SECS);
+        if timeout_secs != ai_cfg.timeout_secs {
+            println!(
+                "[AiService] ai.timeout_secs={} is below the {}s floor for batch generation; using {}s",
+                ai_cfg.timeout_secs, MIN_AI_TIMEOUT_SECS, timeout_secs
+            );
+        }
+        let timeout = Duration::from_secs(timeout_secs);
         let client = Client::builder()
             .timeout(timeout)
             .build()
@@ -298,6 +313,14 @@ impl AiService {
         }
     }
 
+    /// The "fallback" is a second attempt against the same 9router endpoint,
+    /// so retrying a timeout just waits the whole timeout again for the same
+    /// slow answer -- and doubles how long the caller waits before hearing
+    /// about it. Retry everything else (a dropped connection, a 5xx).
+    fn worth_retrying(err: &AiError) -> bool {
+        !matches!(err, AiError::Timeout)
+    }
+
     /// Perkaya sebuah soal menggunakan AI. Coba primary provider dulu;
     /// jika gagal, fallback ke provider kedua.
     pub async fn enrich_question(&self, soal: &SoalContext) -> Result<EnrichedContent, AiError> {
@@ -319,7 +342,7 @@ impl AiService {
                 })
             }
             Err(primary_err) => {
-                match &self.fallback {
+                match self.fallback.as_ref().filter(|_| Self::worth_retrying(&primary_err)) {
                     Some(fallback) => {
                         eprintln!(
                             "[AiService] Primary ({}) failed: {}. Trying fallback ({})...",
@@ -486,7 +509,7 @@ impl AiService {
 
         match self.primary.complete(&system, &user, max_tokens).await {
             Ok((text, _, _)) => Self::parse_generated_soal(&text),
-            Err(primary_err) => match &self.fallback {
+            Err(primary_err) => match self.fallback.as_ref().filter(|_| Self::worth_retrying(&primary_err)) {
                 Some(fallback) => {
                     eprintln!(
                         "[AiService] generate_soal primary ({}) failed: {}. Trying fallback ({})...",
@@ -915,6 +938,8 @@ mod tests {
         model: &'static str,
         /// Some(response_text) → success; None → error
         response: Option<&'static str>,
+        /// Fail with Timeout instead of ProviderError.
+        times_out: bool,
     }
 
     #[async_trait]
@@ -927,6 +952,7 @@ mod tests {
         ) -> Result<(String, u32, u32), AiError> {
             match self.response {
                 Some(text) => Ok((text.to_string(), 10, 20)),
+                None if self.times_out => Err(AiError::Timeout),
                 None => Err(AiError::ProviderError("mock provider error".to_string())),
             }
         }
@@ -970,6 +996,7 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: Some(VALID_JSON_RESPONSE),
+                times_out: false,
             }),
             None,
             2048,
@@ -995,11 +1022,13 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: None, // primary gagal
+                times_out: false,
             }),
             Some(Box::new(MockProvider {
                 name: "gemini",
                 model: "gemini-2.0-flash",
                 response: Some(VALID_JSON_RESPONSE),
+                times_out: false,
             })),
             2048,
         );
@@ -1019,11 +1048,13 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: None,
+                times_out: false,
             }),
             Some(Box::new(MockProvider {
                 name: "gemini",
                 model: "gemini-2.0-flash",
                 response: None,
+                times_out: false,
             })),
             2048,
         );
@@ -1041,6 +1072,7 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: None,
+                times_out: false,
             }),
             None,
             2048,
@@ -1059,6 +1091,7 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: Some("Ini bukan JSON sama sekali."),
+                times_out: false,
             }),
             None,
             2048,
@@ -1078,6 +1111,7 @@ mod tests {
                 name: "deepseek",
                 model: "deepseek-chat",
                 response: Some(Box::leak(fenced.into_boxed_str())),
+                times_out: false,
             }),
             None,
             2048,
@@ -1191,5 +1225,43 @@ mod tests {
         let (system, _user) = AiService::build_prompt(&soal);
         assert!(system.contains("JSON"));
         assert!(system.contains('{') && system.contains('}'));
+    }
+
+    // ── Test: timeout tidak diulang ke endpoint yang sama ──────────────────────
+
+    #[tokio::test]
+    async fn timeout_is_not_retried_against_the_same_endpoint() {
+        // The fallback slot points at the same 9router as the primary, so a
+        // retry would wait the full timeout again for the same slow answer.
+        let service = AiService::new_with_providers(
+            Box::new(MockProvider { name: "9router", model: "default-soal", response: None, times_out: true }),
+            Some(Box::new(MockProvider {
+                name: "9router-retry",
+                model: "default-soal",
+                response: Some(VALID_JSON_RESPONSE),
+                times_out: false,
+            })),
+            2048,
+        );
+
+        let err = service.enrich_question(&sample_soal()).await.unwrap_err();
+        assert!(matches!(err, AiError::Timeout), "expected the timeout to surface, got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn other_provider_errors_still_fall_back() {
+        let service = AiService::new_with_providers(
+            Box::new(MockProvider { name: "9router", model: "default-soal", response: None, times_out: false }),
+            Some(Box::new(MockProvider {
+                name: "9router-retry",
+                model: "default-soal",
+                response: Some(VALID_JSON_RESPONSE),
+                times_out: false,
+            })),
+            2048,
+        );
+
+        let enriched = service.enrich_question(&sample_soal()).await.expect("fallback should answer");
+        assert_eq!(enriched.provider_used, "9router-retry");
     }
 }
