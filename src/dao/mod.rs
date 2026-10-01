@@ -28,6 +28,7 @@ pub mod taxonomy_dao;
 pub mod admin_hierarchy_dao;
 pub mod exam_simulation_dao;
 pub mod soal_pool_dao;
+pub mod payment_claim_dao;
 mod passage_dao;
 // mod user_to_group_dao;
 

@@ -8,3 +8,5 @@ pub mod difficulty_service;
 pub mod ai_service;
 pub mod simulasi_generation_service;
 pub mod soal_analytics_service;
+pub mod qris_service;
+pub mod telegram_service;

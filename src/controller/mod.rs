@@ -50,6 +50,7 @@ pub mod admin_hierarchy_controller;
 pub mod admin_simulasi_controller;
 pub mod simulasi_ujian_controller;
 pub mod soal_pool_controller;
+pub mod qris_payment_controller;
 
 // pub use group_controller::init as init_group_controller;
 // pub use index_controller::init as init_index_controller;

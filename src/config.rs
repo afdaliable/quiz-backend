@@ -66,6 +66,32 @@ struct PaymentConfig {
     mayar_saas_api_url: String,
 }
 
+/// Pembayaran QRIS statis milik merchant sendiri (GoPay Merchant dll).
+/// `static_payload` adalah isi QR statis apa adanya, diawali "00020101021126...".
+#[derive(Deserialize, Clone)]
+pub struct QrisConfig {
+    pub static_payload: String,
+    /// Jam sampai klaim yang belum disetujui dicabut otomatis. 0 = tanpa batas.
+    #[serde(default = "default_auto_revoke")]
+    pub auto_revoke_hours: u32,
+}
+
+fn default_auto_revoke() -> u32 {
+    48
+}
+
+/// Notifikasi ke pemilik saat ada klaim pembayaran, lewat bot Telegram.
+#[derive(Deserialize, Clone)]
+pub struct TelegramConfig {
+    pub bot_token: String,
+    /// Chat tujuan notifikasi (chat pribadi pemilik atau grup).
+    pub chat_id: String,
+    /// Token rahasia yang dicocokkan dengan header
+    /// `X-Telegram-Bot-Api-Secret-Token` pada webhook, supaya orang lain tidak
+    /// bisa memalsukan persetujuan.
+    pub webhook_secret: String,
+}
+
 #[derive(Deserialize, Clone)]
 struct RedisConfig {
     host: String,
@@ -100,6 +126,10 @@ pub struct Config {
     upload_dir: Option<String>,
     #[serde(default)]
     google_oauth_upkp: Option<GoogleOAuthConfig>,
+    #[serde(default)]
+    qris: Option<QrisConfig>,
+    #[serde(default)]
+    telegram: Option<TelegramConfig>,
 }
 
 impl Config {
@@ -119,6 +149,14 @@ impl Config {
             }
         });
         config
+    }
+
+    pub fn get_qris(&self) -> Option<&QrisConfig> {
+        self.qris.as_ref()
+    }
+
+    pub fn get_telegram(&self) -> Option<&TelegramConfig> {
+        self.telegram.as_ref()
     }
 
     pub fn get_app_url(&self) -> String {

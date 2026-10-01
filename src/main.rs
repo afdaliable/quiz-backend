@@ -120,6 +120,41 @@ async fn main() -> std::io::Result<()> {
         }
     });
 
+    // Background task: klaim pembayaran QRIS yang tidak diputuskan sampai batas
+    // waktu dicabut otomatis -- lupa memeriksa mutasi berarti akses mati, bukan
+    // premium gratis selamanya.
+    let app_state_klaim = app_state.clone();
+    tokio::spawn(async move {
+        let mut interval = time::interval(Duration::from_secs(600));
+        loop {
+            interval.tick().await;
+            match quiz_backend::dao::payment_claim_dao::cabut_kedaluwarsa(
+                &app_state_klaim.context.soal.pool,
+            )
+            .await
+            {
+                Ok(dicabut) if !dicabut.is_empty() => {
+                    println!("[klaim] {} klaim kedaluwarsa dicabut", dicabut.len());
+                    if let Some(tg) = app_state_klaim.config.get_telegram() {
+                        let daftar: Vec<String> = dicabut
+                            .iter()
+                            .map(|k| format!("#{} Rp{}", k.id, k.unique_amount))
+                            .collect();
+                        let svc = quiz_backend::service::telegram_service::TelegramService::new(tg);
+                        let _ = svc
+                            .kirim_teks(&format!(
+                                "⏰ Klaim dicabut otomatis (batas waktu lewat):\n{}",
+                                daftar.join("\n")
+                            ))
+                            .await;
+                    }
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[klaim] gagal mencabut klaim kedaluwarsa: {e:?}"),
+            }
+        }
+    });
+
     // Background task: recalculate difficulty weekly (AFD-206)
     let app_state_diff = app_state.clone();
     tokio::spawn(async move {
@@ -207,6 +242,7 @@ async fn main() -> std::io::Result<()> {
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
             .configure(quiz_backend::controller::soal_pool_controller::configure_routes)
+            .configure(quiz_backend::controller::qris_payment_controller::configure_routes)
             .service(
                 afiles::Files::new("/static/soal-images", soal_images_dir.clone())
                     .use_last_modified(true)

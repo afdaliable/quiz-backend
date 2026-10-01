@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 29] = [
+const PUBLIC_ROUTES: [&str; 31] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -112,6 +112,10 @@ const PUBLIC_ROUTES: [&str; 29] = [
     "/api/user/update-phone",
     "/payment/webhook",
     "/api/payment/webhook",  // API-prefixed version
+    // Webhook Telegram: tidak ada JWT, keasliannya dicek lewat header
+    // X-Telegram-Bot-Api-Secret-Token di qris_payment_controller.
+    "/payment/telegram/webhook",
+    "/api/payment/telegram/webhook",
     "/license-public",
     "/admin",     // Admin routes handle their own auth via Authentik
     "/api/admin", // API-prefixed version
