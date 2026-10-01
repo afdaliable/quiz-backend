@@ -206,6 +206,12 @@ async fn main() -> std::io::Result<()> {
             .configure(controller::init_auth_controller)
             .configure(controller::init_kategori_controller)
             .configure(controller::init_premium_controller)
+            // HARUS sebelum init_payment_controller: controller itu memasang
+            // web::scope("/payment") yang menelan semua /payment/* yang
+            // terdaftar sesudahnya (actix: scope dicocokkan urut, yang pertama
+            // menang). Terbukti: /payment/qris/start membalas 404 saat ia
+            // terdaftar setelahnya.
+            .configure(quiz_backend::controller::qris_payment_controller::configure_routes)
             .configure(controller::init_payment_controller)
             .configure(controller::init_user_controller)
             .configure(controller::init_license_controller)
@@ -242,7 +248,6 @@ async fn main() -> std::io::Result<()> {
             .configure(quiz_backend::controller::leaderboard_controller::configure_routes)
             .configure(quiz_backend::controller::taxonomy_controller::configure_routes)
             .configure(quiz_backend::controller::soal_pool_controller::configure_routes)
-            .configure(quiz_backend::controller::qris_payment_controller::configure_routes)
             .service(
                 afiles::Files::new("/static/soal-images", soal_images_dir.clone())
                     .use_last_modified(true)
