@@ -212,6 +212,7 @@ async fn main() -> std::io::Result<()> {
             // menang). Terbukti: /payment/qris/start membalas 404 saat ia
             // terdaftar setelahnya.
             .configure(quiz_backend::controller::qris_payment_controller::configure_routes)
+            .configure(quiz_backend::controller::klikqris_controller::configure_routes)
             .configure(controller::init_payment_controller)
             .configure(controller::init_user_controller)
             .configure(controller::init_license_controller)

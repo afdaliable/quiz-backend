@@ -10,3 +10,4 @@ pub mod simulasi_generation_service;
 pub mod soal_analytics_service;
 pub mod qris_service;
 pub mod telegram_service;
+pub mod klikqris_service;

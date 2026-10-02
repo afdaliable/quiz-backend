@@ -95,7 +95,7 @@ impl AuthMiddleware {
 }
 
 // Public routes that don't need authentication
-const PUBLIC_ROUTES: [&str; 31] = [
+const PUBLIC_ROUTES: [&str; 33] = [
     "/signup",
     "/auth/v1/token",
     "/auth/login",
@@ -116,6 +116,9 @@ const PUBLIC_ROUTES: [&str; 31] = [
     // X-Telegram-Bot-Api-Secret-Token di qris_payment_controller.
     "/payment/telegram/webhook",
     "/api/payment/telegram/webhook",
+    // Webhook KlikQRIS: tanpa JWT, divalidasi lewat signature transaksi.
+    "/payment/klikqris/webhook",
+    "/api/payment/klikqris/webhook",
     "/license-public",
     "/admin",     // Admin routes handle their own auth via Authentik
     "/api/admin", // API-prefixed version

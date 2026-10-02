@@ -80,6 +80,22 @@ fn default_auto_revoke() -> u32 {
     48
 }
 
+/// Payment gateway KlikQRIS (QRIS dinamis + webhook).
+#[derive(Deserialize, Clone)]
+pub struct KlikqrisConfig {
+    #[serde(default = "default_klikqris_base")]
+    pub base_url: String,
+    pub api_key: String,
+    pub id_merchant: String,
+    /// URL webhook per transaksi. Kosong = pakai webhook global di dashboard KlikQRIS.
+    #[serde(default)]
+    pub callback_url: Option<String>,
+}
+
+fn default_klikqris_base() -> String {
+    "https://klikqris.com/api".to_string()
+}
+
 /// Notifikasi ke pemilik saat ada klaim pembayaran, lewat bot Telegram.
 #[derive(Deserialize, Clone)]
 pub struct TelegramConfig {
@@ -130,6 +146,8 @@ pub struct Config {
     qris: Option<QrisConfig>,
     #[serde(default)]
     telegram: Option<TelegramConfig>,
+    #[serde(default)]
+    klikqris: Option<KlikqrisConfig>,
 }
 
 impl Config {
@@ -153,6 +171,10 @@ impl Config {
 
     pub fn get_qris(&self) -> Option<&QrisConfig> {
         self.qris.as_ref()
+    }
+
+    pub fn get_klikqris(&self) -> Option<&KlikqrisConfig> {
+        self.klikqris.as_ref()
     }
 
     pub fn get_telegram(&self) -> Option<&TelegramConfig> {
