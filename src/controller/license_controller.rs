@@ -282,6 +282,10 @@ pub async fn verify_license(
                 mayar_link_payment: None,
                 created_at: Some(Utc::now()),
                 updated_at: Some(Utc::now()),
+                original_price: None,
+                period: None,
+                is_active: false,
+                sort_order: 0,
             }
         }
         Err(e) => {

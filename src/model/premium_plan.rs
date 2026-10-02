@@ -13,6 +13,16 @@ pub struct PremiumPlan {
     pub features: String, // JSON array of features
     pub mayar_product_id: Option<String>, // New field for Mayar product ID
     pub mayar_link_payment: Option<String>, // New field for Mayar payment link
+    /// Harga sebelum diskon, ditampilkan dicoret.
+    #[sqlx(default)]
+    pub original_price: Option<f64>,
+    /// "monthly" | "yearly" -- dipakai mencocokkan cakupan kode promo.
+    #[sqlx(default)]
+    pub period: Option<String>,
+    #[sqlx(default)]
+    pub is_active: bool,
+    #[sqlx(default)]
+    pub sort_order: i32,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -28,6 +38,8 @@ pub struct PremiumPlanResponse {
     pub features: Vec<String>,
     pub mayar_product_id: Option<String>, // New field for Mayar product ID
     pub mayar_link_payment: Option<String>, // New field for Mayar payment link
+    pub original_price: Option<f64>,
+    pub period: Option<String>,
 }
 
 impl From<PremiumPlan> for PremiumPlanResponse {
@@ -44,6 +56,8 @@ impl From<PremiumPlan> for PremiumPlanResponse {
             features,
             mayar_product_id: plan.mayar_product_id,
             mayar_link_payment: plan.mayar_link_payment,
+            original_price: plan.original_price,
+            period: plan.period,
         }
     }
 }
@@ -70,4 +84,12 @@ pub struct UpdatePremiumPlanRequest {
     pub features: Option<Vec<String>>,
     pub mayar_product_id: Option<String>, // New field for Mayar product ID
     pub mayar_link_payment: Option<String>, // New field for Mayar payment link
-} 
+    #[serde(default)]
+    pub original_price: Option<f64>,
+    #[serde(default)]
+    pub period: Option<String>,
+    #[serde(default)]
+    pub is_active: Option<bool>,
+    #[serde(default)]
+    pub sort_order: Option<i32>,
+}

@@ -17,35 +17,56 @@ pub struct ErrorResponse {
 }
 
 pub fn init(cfg: &mut web::ServiceConfig) {
+    // Hanya baca di sini. Endpoint yang MENGUBAH plan, langganan, dan aturan akses
+    // pindah ke /admin/premium (lihat init_admin): sebelumnya mereka di scope ini
+    // tanpa pengecekan admin, sehingga user mana pun bisa membuat langganan untuk
+    // dirinya sendiri atau mengubah harga plan -- terbukti di produksi dengan
+    // token user biasa yang lolos sampai ke handler.
     cfg.service(
         web::scope("/premium")
-            // Premium Plans
             .route("/plans", web::get().to(get_premium_plans))
             .route("/plans/{id}", web::get().to(get_premium_plan_by_id))
-            .route("/plans", web::post().to(create_premium_plan))
-            .route("/plans/{id}", web::put().to(update_premium_plan))
-            .route("/plans/{id}", web::delete().to(delete_premium_plan))
-            
-            // User Subscriptions
             .route("/subscriptions", web::get().to(get_user_subscriptions))
             .route("/subscriptions/active", web::get().to(get_active_subscription))
             .route("/subscriptions/{id}", web::get().to(get_subscription_by_id))
-            .route("/subscriptions", web::post().to(create_subscription))
-            .route("/subscriptions/{id}", web::put().to(update_subscription))
-            .route("/subscriptions/{id}/cancel", web::post().to(cancel_subscription))
-            
-            // Premium Quiz Access
             .route("/quiz-access", web::get().to(get_all_premium_quiz_access))
             .route("/quiz-access/{id}", web::get().to(get_premium_quiz_access_by_id))
             .route("/quiz-access/quiz/{paket_soal_id}", web::get().to(get_premium_quiz_access_by_paket_soal_id))
+            .route("/check-status", web::get().to(check_user_premium_status))
+            .route("/offer", web::get().to(crate::controller::premium_offer_controller::get_offer))
+    );
+}
+
+/// Endpoint pengubah data premium, khusus admin. Harus didaftarkan sebelum
+/// init_admin_hierarchy_controller (scope /admin catch-all) di main.rs.
+pub fn init_admin(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/admin/premium")
+            .wrap(crate::middleware::admin_middleware::AdminMiddleware::new())
+            .route("/plans", web::get().to(get_premium_plans_admin))
+            .route("/plans", web::post().to(create_premium_plan))
+            .route("/plans/{id}", web::put().to(update_premium_plan))
+            .route("/plans/{id}", web::delete().to(delete_premium_plan))
+            .route("/subscriptions", web::post().to(create_subscription))
+            .route("/subscriptions/{id}", web::put().to(update_subscription))
+            .route("/subscriptions/{id}/cancel", web::post().to(cancel_subscription))
             .route("/quiz-access", web::post().to(create_premium_quiz_access))
             .route("/quiz-access/{id}", web::put().to(update_premium_quiz_access))
             .route("/quiz-access/{id}", web::delete().to(delete_premium_quiz_access))
-            .route("/check-status", web::get().to(check_user_premium_status))
     );
 }
 
 // Premium Plans
+async fn get_premium_plans_admin(data: web::Data<AppState<'_>>) -> impl Responder {
+    match data.context.premium_plans.get_all_premium_plans_admin().await {
+        Ok(plans) => HttpResponse::Ok().json(serde_json::json!({"data": plans})),
+        Err(e) => {
+            eprintln!("[admin/premium/plans] {e:?}");
+            HttpResponse::InternalServerError().finish()
+        }
+    }
+}
+
 async fn get_premium_plans(data: web::Data<AppState<'_>>) -> impl Responder {
     log_request("/premium/plans", &data.connections);
 

@@ -18,6 +18,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::dao::payment_claim_dao::buat_langganan;
+use crate::dao::{premium_access_dao, promo_dao};
 use crate::middleware::auth_middleware::AuthenticatedUser;
 use crate::service::klikqris_service::{nominal, signature_sama, status_baku, KlikqrisService};
 use crate::AppState;
@@ -113,6 +114,16 @@ async fn lunasi(pool: &sqlx::MySqlPool, order_id: &str, paid_at: Option<&str>, p
         .execute(pool)
         .await
         .map_err(|e| format!("gagal mencatat langganan: {e}"))?;
+    // Kode promo baru dihitung terpakai saat lunas. Gagal mencatat tidak boleh
+    // membatalkan langganan yang sudah dibayar.
+    let promo: Option<(Option<i32>, i32)> =
+        sqlx::query_as("SELECT promo_id, discount_amount FROM dbquizapp.klikqris_transactions WHERE order_id=?")
+            .bind(order_id).fetch_optional(pool).await.unwrap_or(None);
+    if let Some((Some(promo_id), potongan)) = promo {
+        if let Err(e) = promo_dao::catat_pemakaian(pool, promo_id, &b.user_id, order_id, potongan as i64).await {
+            eprintln!("[klikqris] {order_id}: gagal mencatat pemakaian promo #{promo_id}: {e}");
+        }
+    }
     println!("[klikqris] {order_id} lunas -> langganan #{sub} untuk {}", b.user_id);
     Ok(true)
 }
@@ -120,6 +131,8 @@ async fn lunasi(pool: &sqlx::MySqlPool, order_id: &str, paid_at: Option<&str>, p
 #[derive(Deserialize)]
 pub struct BuatRequest {
     pub plan_id: i32,
+    #[serde(default)]
+    pub promo_code: Option<String>,
 }
 
 #[post("/payment/klikqris/create")]
@@ -136,16 +149,44 @@ async fn buat_transaksi(
         }
     };
     let pool = &*state.context.soal.pool;
-    let plan: Option<(i32, String, f64)> =
-        sqlx::query_as("SELECT id, name, price FROM dbquizapp.premium_plans WHERE id = ?")
-            .bind(req.plan_id)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
-    let (plan_id, nama, harga) = match plan {
+    let plan: Option<(i32, String, f64, Option<String>)> = sqlx::query_as(
+        "SELECT id, name, price, period FROM dbquizapp.premium_plans WHERE id = ? AND is_active = 1",
+    )
+    .bind(req.plan_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+    let (plan_id, nama, harga, period) = match plan {
         Some(p) => p,
         None => return HttpResponse::NotFound().json(json!({"error": "plan_tidak_ada"})),
     };
+    let harga = harga.round() as i64;
+
+    // Potongan dihitung di server dari kode, tidak pernah dari angka kiriman browser.
+    let mut promo_id: Option<i32> = None;
+    let mut potongan: i64 = 0;
+    if let Some(kode) = req.promo_code.as_deref().map(str::trim).filter(|k| !k.is_empty()) {
+        let trial_berakhir = premium_access_dao::pastikan_trial(pool, &user.user_id)
+            .await.ok().flatten().map(|t| t.berakhir);
+        match promo_dao::validasi(pool, &user.user_id, kode, period.as_deref(), harga, trial_berakhir).await {
+            Ok(Ok((p, d))) => {
+                promo_id = Some(p.id);
+                potongan = d;
+            }
+            Ok(Err(alasan)) => {
+                return HttpResponse::UnprocessableEntity().json(json!({"error": alasan, "message": pesan_promo(alasan)}))
+            }
+            Err(e) => {
+                eprintln!("[klikqris] validasi promo gagal: {e}");
+                return HttpResponse::InternalServerError().json(json!({"error": "gagal_memeriksa_kode"}));
+            }
+        }
+    }
+    let bayar = harga - potongan;
+    if bayar < 1 {
+        return HttpResponse::UnprocessableEntity()
+            .json(json!({"error": "nominal_nol", "message": "Kode ini membuat tagihan Rp0; hubungi admin."}));
+    }
 
     let order_id = format!(
         "QZ{plan_id}-{}-{:04x}",
@@ -153,7 +194,7 @@ async fn buat_transaksi(
         rand::random::<u16>()
     );
     let trx = match KlikqrisService::new(cfg)
-        .buat(&order_id, harga as i64, &format!("Langganan {nama}"))
+        .buat(&order_id, bayar, &format!("Langganan {nama}"))
         .await
     {
         Ok(t) => t,
@@ -169,8 +210,9 @@ async fn buat_transaksi(
     }
     if let Err(e) = sqlx::query(
         "INSERT INTO dbquizapp.klikqris_transactions \
-         (order_id, user_id, plan_id, amount, total_amount, status, signature, qris_url, report_url, expired_at) \
-         VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)",
+         (order_id, user_id, plan_id, amount, total_amount, status, signature, qris_url, report_url, expired_at, \
+          base_amount, discount_amount, promo_id) \
+         VALUES (?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&trx.order_id)
     .bind(&user.user_id)
@@ -181,6 +223,9 @@ async fn buat_transaksi(
     .bind(&trx.qris_url)
     .bind(&trx.report_url)
     .bind(&trx.expired_at)
+    .bind(harga as i32)
+    .bind(potongan as i32)
+    .bind(promo_id)
     .execute(pool)
     .await
     {
@@ -191,6 +236,8 @@ async fn buat_transaksi(
     HttpResponse::Created().json(json!({
         "order_id": trx.order_id,
         "plan": nama,
+        "base_amount": harga,
+        "discount_amount": potongan,
         "amount": trx.amount,
         "total_amount": trx.total_amount,
         "qris_image": trx.qris_image,
@@ -201,6 +248,18 @@ async fn buat_transaksi(
         "signature": trx.signature,
         "status": "PENDING",
     }))
+}
+
+fn pesan_promo(alasan: &str) -> &'static str {
+    match alasan {
+        "kode_tidak_dikenal" => "Kode promo tidak dikenal.",
+        "kode_tidak_berlaku" => "Kode promo sudah tidak berlaku.",
+        "kode_tidak_untuk_paket_ini" => "Kode promo ini tidak berlaku untuk paket yang dipilih.",
+        "kuota_habis" => "Kuota kode promo sudah habis.",
+        "sudah_dipakai" => "Kode promo ini sudah pernah kamu pakai.",
+        "hanya_pembayaran_pertama" => "Kode promo ini hanya untuk pembayaran pertama.",
+        _ => "Kode promo tidak bisa dipakai.",
+    }
 }
 
 #[get("/payment/klikqris/{order_id}")]

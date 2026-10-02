@@ -128,7 +128,7 @@ async fn get_paket_soal_response(
         
         if let Some(user_id) = user_id_opt {
             // Check if user has access to this premium quiz package
-            match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_response.paket_soal_id).await {
+            match Ok::<bool, sqlx::Error>(crate::dao::premium_access_dao::punya_akses_premium(&app_state.context.soal.pool, &user_id).await) {
                 Ok(has_access) => {
                     can_access = has_access;
                 },
@@ -143,6 +143,12 @@ async fn get_paket_soal_response(
         }
     }
     
+    // Isi soal paket premium tidak dikirim ke yang belum berhak.
+    let mut paket_soal_response = paket_soal_response;
+    if !can_access {
+        paket_soal_response.kumpulan_soal.clear();
+    }
+
     // Get available premium plans if user cannot access
     let available_plans = if subscription_required && !can_access {
         match app_state.read_context.premium_plans.get_all_premium_plans().await {
@@ -251,25 +257,17 @@ async fn get_paket_soal_by_category(
     // Check access for each quiz package
     let mut quiz_packages_with_access = Vec::new();
     
-    for response in paket_soal_responses {
-        let mut can_access = true;
-        
-        if response.is_premium {
-            if let Some(ref user_id) = user_id_opt {
-                // Check if user has access to this premium quiz package
-                match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(user_id, response.paket_soal_id).await {
-                    Ok(has_access) => {
-                        can_access = has_access;
-                    },
-                    Err(e) => {
-                        println!("Error checking user access: {:?}", e);
-                        can_access = false;
-                    }
-                }
-            } else {
-                // No token provided, user cannot access premium quiz
-                can_access = false;
-            }
+    // Akses premium berlaku untuk semua paket sekaligus (langganan atau trial),
+    // jadi cukup diperiksa sekali per permintaan.
+    let akses_premium = match user_id_opt {
+        Some(ref user_id) => crate::dao::premium_access_dao::punya_akses_premium(&app_state.context.soal.pool, user_id).await,
+        None => false,
+    };
+    for mut response in paket_soal_responses {
+        let can_access = !response.is_premium || akses_premium;
+        if !can_access {
+            // Isi soal paket premium tidak dikirim ke yang belum berhak.
+            response.kumpulan_soal.clear();
         }
         
         quiz_packages_with_access.push(serde_json::json!({
@@ -424,7 +422,7 @@ async fn check_quiz_access(
             
             if let Some(user_id) = user_id_opt {
                 // Check if user has access to this premium quiz package
-                match app_state.read_context.premium_quiz_access.check_user_access_to_quiz(&user_id, paket_soal_id).await {
+                match Ok::<bool, sqlx::Error>(crate::dao::premium_access_dao::punya_akses_premium(&app_state.context.soal.pool, &user_id).await) {
                     Ok(true) => {
                         // User has access
                         HttpResponse::Ok().json(serde_json::json!({

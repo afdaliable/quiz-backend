@@ -5,7 +5,7 @@ use sqlx::Error;
 impl<'c> Table<'c, PremiumPlan> {
     pub async fn get_all_premium_plans(&self) -> Result<Vec<PremiumPlan>, Error> {
         sqlx::query_as::<_, PremiumPlan>(
-            "SELECT * FROM dbquizapp.premium_plans ORDER BY price ASC"
+            "SELECT * FROM dbquizapp.premium_plans WHERE is_active = 1 ORDER BY sort_order, price ASC"
         )
         .fetch_all(&*self.pool)
         .await
@@ -124,6 +124,32 @@ impl<'c> Table<'c, PremiumPlan> {
             needs_comma = true;
         }
 
+        // Harga coret: 0 atau negatif berarti hapus coretan.
+        if let Some(asli) = plan.original_price {
+            if needs_comma { query_builder.push(", "); }
+            query_builder.push("original_price = ");
+            query_builder.push_bind(if asli > 0.0 { Some(asli) } else { None });
+            needs_comma = true;
+        }
+        if let Some(period) = &plan.period {
+            if needs_comma { query_builder.push(", "); }
+            query_builder.push("period = ");
+            query_builder.push_bind(period);
+            needs_comma = true;
+        }
+        if let Some(aktif) = plan.is_active {
+            if needs_comma { query_builder.push(", "); }
+            query_builder.push("is_active = ");
+            query_builder.push_bind(aktif);
+            needs_comma = true;
+        }
+        if let Some(urutan) = plan.sort_order {
+            if needs_comma { query_builder.push(", "); }
+            query_builder.push("sort_order = ");
+            query_builder.push_bind(urutan);
+            needs_comma = true;
+        }
+
         if !needs_comma {
             return Ok(false);
         }
@@ -134,6 +160,13 @@ impl<'c> Table<'c, PremiumPlan> {
         let result = query_builder.build().execute(&*self.pool).await?;
         
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Semua plan termasuk yang disembunyikan, untuk halaman admin.
+    pub async fn get_all_premium_plans_admin(&self) -> Result<Vec<PremiumPlan>, Error> {
+        sqlx::query_as::<_, PremiumPlan>("SELECT * FROM dbquizapp.premium_plans ORDER BY is_active DESC, sort_order, price")
+            .fetch_all(&*self.pool)
+            .await
     }
 
     pub async fn delete_premium_plan(&self, id: i32) -> Result<bool, Error> {

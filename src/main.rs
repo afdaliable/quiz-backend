@@ -241,6 +241,8 @@ async fn main() -> std::io::Result<()> {
             // because admin_hierarchy_controller registers a catch-all `web::scope("/admin")`
             // (for bulk_update_questions, get_question_stats) that would swallow any /admin/* path
             // registered after it. Actix-web matches scopes in registration order, first-match-wins.
+            .configure(controller::init_admin_premium_controller)
+            .configure(controller::init_admin_promo_controller)
             .configure(controller::init_admin_simulasi_controller)
             .configure(quiz_backend::controller::simulasi_ujian_controller::configure_routes)
             .configure(controller::init_admin_hierarchy_controller)
